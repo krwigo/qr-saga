@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" IgnorableNamespaces="uap mp">
-  <Identity Name="43059Midtask.QRSaga" Publisher="CN=F1078D5A-FE31-4C92-B6BA-6175AAFCE644" Version="1.1.4.0" />
+  <Identity Name="43059Midtask.QRSaga" Publisher="CN=F1078D5A-FE31-4C92-B6BA-6175AAFCE644" Version="1.1.5.0" />
   <mp:PhoneIdentity PhoneProductId="3bb00725-3d0b-4a02-bcd6-dcc1ea55621d" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
   <Properties>
     <DisplayName>QR Saga</DisplayName>
@@ -23,7 +23,9 @@
         <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="white" />
         <uap:InitialRotationPreference>
           <uap:Rotation Preference="portrait" />
+          <uap:Rotation Preference="landscape" />
           <uap:Rotation Preference="portraitFlipped" />
+          <uap:Rotation Preference="landscapeFlipped" />
         </uap:InitialRotationPreference>
       </uap:VisualElements>
     </Application>

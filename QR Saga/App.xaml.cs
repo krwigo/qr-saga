@@ -7,6 +7,9 @@ using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
+using Windows.Foundation.Metadata;
+using Windows.UI;
+using Windows.UI.ViewManagement;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Controls.Primitives;
@@ -53,6 +56,25 @@ namespace QR_Saga
                 if (e.PreviousExecutionState == ApplicationExecutionState.Terminated)
                 {
                     //TODO: Load state from previously suspended application
+                }
+
+                // Set Titlebar
+                try
+                {
+                    if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.ApplicationView"))
+                    {
+                        var titleBar = ApplicationView.GetForCurrentView().TitleBar;
+                        if (titleBar != null)
+                        {
+                            titleBar.ButtonBackgroundColor = Colors.Black;
+                            titleBar.ButtonForegroundColor = Colors.White;
+                            titleBar.BackgroundColor = Colors.Black;
+                            titleBar.ForegroundColor = Colors.White;
+                        }
+                    }
+                }
+                catch
+                {
                 }
 
                 // Place the frame in the current Window

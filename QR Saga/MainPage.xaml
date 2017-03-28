@@ -9,15 +9,28 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition/>
             <RowDefinition/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid Grid.Row="0" Background="Black">
-            <CaptureElement x:Name="captureElement"/>
+            <Rectangle x:Name="BackgroundElement" Fill="Transparent" />
+            <!--
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Image Height="32" Margin="5,0" Source="Assets/StoreLogo.png" />
+            </Grid>
+            -->
+        </Grid>
+        <Grid Grid.Row="1" Background="Black">
+            <CaptureElement x:Name="captureElement" SizeChanged="captureElement_SizeChanged" Stretch="UniformToFill" />
             <Image Canvas.ZIndex="5" Source="Assets/crosshairs-red2.png" HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Grid>
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <ListView x:Name="listView1" IsItemClickEnabled="True" ItemClick="listView1_ItemClick" SelectionMode="None">
                 <ListView.ItemTemplate>
                     <DataTemplate>
@@ -28,14 +41,14 @@
                 <local:Scan Text="Dev Item 2"/>
             </ListView>
         </Grid>
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <StackPanel Orientation="Vertical">
-                <Slider Maximum="255" Minimum="0" ValueChanged="Slider_ValueChanged"/>
-                <CommandBar>
-                    <AppBarButton Icon="Target" Label="Auto Focus" Click="AppBarButton_Click"/>
-                    <AppBarButton Icon="OneBar" Label="Focus 50" Click="AppBarButton_Click_1"/>
-                    <AppBarButton Icon="TwoBars" Label="Focus 100" Click="AppBarButton_Click_2"/>
-                    <AppBarButton Icon="ThreeBars" Label="Focus 150" Click="AppBarButton_Click_3"/>
+                <CommandBar HorizontalContentAlignment="Stretch">
+                    <CommandBar.Content>
+                        <Slider x:Name="focusSlider1" Maximum="255" Minimum="0" ValueChanged="Slider_ValueChanged" Visibility="Collapsed" HorizontalContentAlignment="Stretch"/>
+                    </CommandBar.Content>
+                    <AppBarToggleButton x:Name="buttonFocusAuto1" Icon="ViewAll" Content="Focus Mode" IsChecked="True" Checked="buttonFocusAuto1_Checked" Unchecked="buttonFocusAuto1_Unchecked"/>
+                    <AppBarToggleButton x:Name="buttonFlash1" Icon="Highlight" Content="Flash Toggle" IsChecked="False" Checked="buttonFlash1_Checked" Unchecked="buttonFlash1_Unchecked"/>
                 </CommandBar>
             </StackPanel>
         </Grid>

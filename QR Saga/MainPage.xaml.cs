@@ -31,6 +31,11 @@ using Windows.ApplicationModel.Core;
 using Windows.UI;
 using Windows.Foundation.Metadata;
 using Windows.Media.Devices;
+using Windows.Graphics.Imaging;
+using System.Text;
+using Windows.UI.Core;
+using Windows.Media;
+using System.Threading;
 
 #if DEBUG
 #pragma warning disable CS4014
@@ -49,180 +54,359 @@ namespace QR_Saga
 
         public Scan() { }
     }
-    
+
     public sealed partial class MainPage : Page
     {
-        private MediaCapture _mediaCapture;
         private List<Scan> m_Scans = new List<Scan>();
 
-        public MainPage()
+        string _rotation;
+        bool _started = false;
+        bool _focusing = false;
+        double _width = 640;
+        double _height = 480;
+
+        MediaCapture _mediaCapture;
+        BarcodeReader _ZXingReader = new BarcodeReader();
+        DispatcherTimer _timerFocus = new DispatcherTimer();
+        //SemaphoreSlim _semRender = new SemaphoreSlim(1);
+        //SemaphoreSlim _semScan = new SemaphoreSlim(1);
+
+        private void vlog(string x)
         {
-            this.InitializeComponent();
-
-            /* note(2017/03/28): moved to App.xaml.cs
-            // desktop titlebar
-            if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.ApplicationView"))
+            try
             {
-                var titleBar = ApplicationView.GetForCurrentView().TitleBar;
-                if (titleBar != null)
-                {
-                    titleBar.ButtonBackgroundColor = Colors.Black;
-                    titleBar.ButtonForegroundColor = Colors.White;
-                    titleBar.BackgroundColor = Colors.Black;
-                    titleBar.ForegroundColor = Colors.White;
-                }
-                //CoreApplication.GetCurrentView().TitleBar.ExtendViewIntoTitleBar = true;
-                //Window.Current.SetTitleBar(BackgroundElement);
+                vlog1.Items.Insert(0, DateTime.Now.ToString("ss.ff") + "| " + x);
             }
-            */
+            catch
+            {
+            }
+        }
 
-            //portrait only
+        async Task CameraStart()
+        {
+            if (_started)
+                return;
+            vlog("CameraStart()");
+            _started = true;
+
+            // ** Devices List
             /*
             try
             {
-                DisplayInformation.AutoRotationPreferences = DisplayOrientations.Portrait;
+                var devices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+
+                //DeviceInformation frontCamera = null;
+                //DeviceInformation rearCamera = null;
+
+                deviceList1.Items.Clear();
+                foreach (var device in devices)
+                {
+                    deviceList1.Items.Add(device.Name);
+                    switch (device.EnclosureLocation.Panel)
+                    {
+                        case Windows.Devices.Enumeration.Panel.Front:
+                            //frontCamera = device;
+                            vlog("DeviceList(Front): " + device.Name);
+                            break;
+                        case Windows.Devices.Enumeration.Panel.Back:
+                            //rearCamera = device;
+                            vlog("DeviceList(Rear): " + device.Name);
+                            break;
+                    }
+                }
+                if (deviceList1.Items.Count > 0)
+                {
+                    deviceList1.SelectedIndex = 0;
+                }
             }
-            catch
+            catch(Exception ex)
             {
+                vlog(ex.Message);
             }
             */
 
-            //desktop size
+            // ** INIT
             try
             {
-                ApplicationView.PreferredLaunchViewSize = new Size(320, 600);
-                ApplicationView.PreferredLaunchWindowingMode = ApplicationViewWindowingMode.PreferredLaunchViewSize;
-                ApplicationView.GetForCurrentView().SetPreferredMinSize(new Size(320, 600));
-            }
-            catch
-            {
-            }
-
-            //listview
-            //possible exception on Xbox?
-            try
-            {
-                jsonLoad();
-            }
-            catch
-            {
-            }
-
-            //begin
-            try
-            {
-                qrScan();
-            }
-            catch
-            {
-                var msgbox = new MessageDialog("No supported cameras found.");
-                msgbox.ShowAsync();
-            }
-        }
-        
-        private async Task qrInit()
-        {
-            try
-            {
+                // ** Devices
                 DeviceInformationCollection webcamList = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
-                DeviceInformation backWebcam = (from webcam in webcamList where webcam.IsEnabled select webcam).FirstOrDefault();
+                DeviceInformation webcamDev = (from webcam in webcamList where webcam.IsEnabled select webcam).FirstOrDefault();
 
+                vlog("Device ID: " + webcamDev.Id);
+                vlog("Device Name: " + webcamDev.Name);
+
+                // ** MediaCapture
                 _mediaCapture = new MediaCapture();
+
                 await _mediaCapture.InitializeAsync(new MediaCaptureInitializationSettings
                 {
-                    VideoDeviceId = backWebcam.Id,
+                    VideoDeviceId = webcamDev.Id,
                     AudioDeviceId = "",
                     StreamingCaptureMode = StreamingCaptureMode.Video,
                     PhotoCaptureSource = PhotoCaptureSource.VideoPreview
                 });
 
+                _mediaCapture.FocusChanged += _mediaCapture_FocusChanged;
+            }
+            catch (Exception ex)
+            {
+                vlog(ex.Message);
+
+                var msgbox = new MessageDialog("Unable to access camera. Connect a camera and try again!");
+                await msgbox.ShowAsync();
+
+                _started = false;
+                return;
+            }
+
+            if (ToggleHighResolution.IsChecked ?? false)
+            {
+                vlog("High Resolution Is Checked");
+
                 try
                 {
-                    var focusSettings = new FocusSettings();
-                    focusSettings.AutoFocusRange = AutoFocusRange.FullRange;
-                    focusSettings.Mode = FocusMode.Auto;
-                    focusSettings.WaitForFocus = true;
-                    focusSettings.DisableDriverFallback = false;
-                    _mediaCapture.VideoDeviceController.FocusControl.Configure(focusSettings);
+                    // ** Camera Resolution
+                    var res = _mediaCapture.VideoDeviceController.GetAvailableMediaStreamProperties(MediaStreamType.VideoPreview);
+                    uint maxResolution = 0;
+                    int indexMaxResolution = 0;
+                    _width = 640;
+                    _height = 480;
+                    if (res.Count >= 1)
+                    {
+                        for (int i = 0; i < res.Count; i++)
+                        {
+                            VideoEncodingProperties vp = (VideoEncodingProperties)res[i];
+                            if (vp.Width > maxResolution)
+                            {
+                                indexMaxResolution = i;
+                                maxResolution = vp.Width;
+                                _width = vp.Width;
+                                _height = vp.Height;
+                                vlog("Camera Resolution " + i + ": " + vp.Width + "x" + vp.Height);
+                            }
+                        }
+                        vlog("Using Camera Resolution " + indexMaxResolution);
+                        await _mediaCapture.VideoDeviceController.SetMediaStreamPropertiesAsync(MediaStreamType.VideoPreview, res[indexMaxResolution]);
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    //var msgbox = new MessageDialog("Auto focus is not available on this device.");
-                    //await msgbox.ShowAsync();
-                    buttonFocusAuto1.IsChecked = false;
+                    vlog(ex.Message);
                 }
-
-                captureElement.Source = _mediaCapture;
-                await _mediaCapture.StartPreviewAsync();
             }
-            catch
+
+            // ** Camera Flash
+            try
             {
-                var msgbox = new MessageDialog("qrInit is not available on this device. Try another!");
-                await msgbox.ShowAsync();
+                if (_mediaCapture.VideoDeviceController.FlashControl.Supported)
+                {
+                    _mediaCapture.VideoDeviceController.FlashControl.Auto = false;
+                    _mediaCapture.VideoDeviceController.FlashControl.Enabled = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                vlog(ex.Message);
+            }
+
+            // ** Camera Rotation
+            tryRotatePreview();
+
+            // ** Camera Start
+            captureElement.Source = _mediaCapture;
+            captureElement.Stretch = Stretch.UniformToFill;
+            await _mediaCapture.StartPreviewAsync();
+
+            // ** Camera Worker
+            CameraWorker();
+
+            // ** Camera Focus
+            var focusControl = _mediaCapture.VideoDeviceController.FocusControl;
+            if (focusControl.FocusChangedSupported)
+            {
+                vlog("Camera Auto Focus");
+
+                //await mediaCapture.StartPreviewAsync();
+                await focusControl.UnlockAsync();
+
+                focusControl.Configure(new FocusSettings {
+                    Mode = FocusMode.Continuous,
+                    AutoFocusRange = AutoFocusRange.FullRange
+                });
+
+                await focusControl.FocusAsync();
+            }
+            else if (focusControl.Supported)
+            {
+                vlog("Camera Manual Focus");
+
+                //await mediaCapture.StartPreviewAsync();
+                await focusControl.UnlockAsync();
+
+                focusControl.Configure(new FocusSettings {
+                    Mode = FocusMode.Auto
+                });
+
+                _timerFocus.Interval = new TimeSpan(0, 0, 3);
+                _timerFocus.Start();
+            }
+            else
+            {
+                vlog("Camera Cannot Focus");
             }
         }
 
-        private async void qrScan()
+        async Task CameraWorker()
         {
+            while (true)
+            {
+                if (!_started)
+                    return;
+
+                var stream = new InMemoryRandomAccessStream();
+                var imgProp = new ImageEncodingProperties {
+                    Subtype = "BMP",
+                    Width = (uint)_width,
+                    Height = (uint)_height
+                };
+
+                VideoFrame videoFrame = new VideoFrame(BitmapPixelFormat.Bgra8, (int)_width, (int)_height);
+                //await _mediaCapture.GetPreviewFrameAsync(videoFrame);
+                //await _mediaCapture.CapturePhotoToStreamAsync(imgProp, stream);
+                //stream.Seek(0);
+                //var wbm = new WriteableBitmap((int)_width, (int)_height); //600, 800
+                //await wbm.SetSourceAsync(stream);
+                //NOTE(2017/03/31 06:47:16): this causes clicking sound
+
+                var currentFrame = await _mediaCapture.GetPreviewFrameAsync(videoFrame);
+                SoftwareBitmap previewFrame = currentFrame.SoftwareBitmap;
+                WriteableBitmap wbm = new WriteableBitmap((int)_width, (int)_height);
+                previewFrame.CopyToBuffer(wbm.PixelBuffer);
+
+                Result result = _ZXingReader.Decode(wbm);
+                if (result != null)
+                {
+                    vlog("Scan Result: " + result.Text);
+
+                    //delete
+                    for (int i = m_Scans.Count - 1; i >= 0; i--)
+                    {
+                        if (result.Text == m_Scans[i].Text)
+                        {
+                            m_Scans.RemoveAt(i);
+                        }
+                    }
+
+                    //insert
+                    var item = new Scan() { Text = result.Text, Date = DateTime.Now.ToString("MM/dd/yyyy hh:mm") };
+                    m_Scans.Insert(0, item);
+                    listView1.ItemsSource = null;
+                    listView1.ItemsSource = m_Scans;
+                    listView1.ScrollIntoView(item);
+
+                    trySetClipboard(result.Text);
+                    tryOpenUrl(result.Text);
+
+                    //save
+                    await jsonWrite();
+
+                    //msgbox
+                    var msgbox = new MessageDialog(result.Text);
+                    await msgbox.ShowAsync();
+                }
+            }
+        }
+        
+        private void _mediaCapture_FocusChanged(MediaCapture sender, MediaCaptureFocusChangedEventArgs args)
+        {
+            vlog("FocusChanged: "+ args.FocusState);
+        }
+
+        async Task CameraStop()
+        {
+            if (!_started)
+                return;
+            vlog("CameraStop()");
+            _started = false;
+
+            _timerFocus.Stop();
+
+            await _mediaCapture.StopPreviewAsync();
+
+            _mediaCapture.FocusChanged -= _mediaCapture_FocusChanged;
+            _mediaCapture.Dispose();
+            _mediaCapture = null;
+        }
+
+        public MainPage()
+        {
+            this.InitializeComponent();
+            this.Loaded += MainPage_Loaded;
+
+            vlog("MainPage()");
+
+            Window.Current.VisibilityChanged += Current_VisibilityChanged;
+            Window.Current.Activated += Current_Activated;
+
+            _timerFocus.Tick += timerFocus_Tick;
+        }
+
+        private void MainPage_Loaded(object sender, RoutedEventArgs e)
+        {
+            // ** User Settings
+            /*
+            ApplicationDataContainer AppSettings = ApplicationData.Current.LocalSettings;
+
+            if (AppSettings.Values.ContainsKey("musicV"))
+            {
+                musicVolume.Value = (double)AppSettings.Values["musicV"];
+            }
+            */
+
+            jsonLoad();
+        }
+
+        private void Current_VisibilityChanged(object sender, Windows.UI.Core.VisibilityChangedEventArgs e)
+        {
+            CameraStop();
+        }
+
+        private void Current_Activated(object sender, WindowActivatedEventArgs e)
+        {
+            CameraStart();
+        }
+
+        private async void timerFocus_Tick(object sender, object e)
+        {
+            if (!_started)
+                return;
+            if (_focusing)
+                return;
+            vlog("Tick");
+            _focusing = true;
+
             try
             {
-                await qrInit();
-
-                var imgProp = new ImageEncodingProperties { Subtype = "BMP", Width = 1200, Height = 1600 };
-                var bcReader = new BarcodeReader();
-
-                while (true)
-                {
-                    var stream = new InMemoryRandomAccessStream();
-                    await _mediaCapture.CapturePhotoToStreamAsync(imgProp, stream);
-
-                    stream.Seek(0);
-                    var wbm = new WriteableBitmap(1200, 1600); //600, 800
-                    await wbm.SetSourceAsync(stream);
-
-                    var result = bcReader.Decode(wbm);
-                    if (result != null)
-                    {
-                        //delete
-                        for (int i = m_Scans.Count - 1; i >= 0; i--)
-                        {
-                            if (result.Text == m_Scans[i].Text)
-                            {
-                                m_Scans.RemoveAt(i);
-                            }
-                        }
-
-                        //insert
-                        var item = new Scan() { Text = result.Text, Date = DateTime.Now.ToString("MM/dd/yyyy hh:mm") };
-                        m_Scans.Insert(0, item);
-                        listView1.ItemsSource = null;
-                        listView1.ItemsSource = m_Scans;
-                        listView1.ScrollIntoView(item);
-
-                        //clipboard
-                        //var dataPackage = new DataPackage();
-                        //dataPackage.SetText(result.Text);
-                        //Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
-                        trySetClipboard(result.Text);
-
-                        //browser
-                        //await Windows.System.Launcher.LaunchUriAsync(new Uri(result.Text));
-                        tryOpenUrl(result.Text);
-
-                        //save
-                        await jsonWrite();
-
-                        //msgbox
-                        var msgbox = new MessageDialog(result.Text);
-                        await msgbox.ShowAsync();
-                    }
-                }
+                await _mediaCapture.VideoDeviceController.FocusControl.FocusAsync();
             }
             catch
             {
-                var msgbox = new MessageDialog("qrScan is not available on this device. Try another!");
-                await msgbox.ShowAsync();
             }
+
+            _focusing = false;
+        }
+
+        private void listView1_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            vlog("ItemClick");
+            var item = (e.ClickedItem as Scan);
+            trySetClipboard(item.Text);
+            tryOpenUrl(item.Text);
+        }
+        
+        private void captureElement_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            tryRotatePreview();
         }
 
         private async Task jsonWrite()
@@ -267,7 +451,7 @@ namespace QR_Saga
             {
                 var dataPackage = new DataPackage();
                 dataPackage.SetText(text);
-                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+                Clipboard.SetContent(dataPackage);
             }
             catch
             {
@@ -278,119 +462,88 @@ namespace QR_Saga
         {
             try
             {
-                Windows.System.Launcher.LaunchUriAsync(new Uri(url));
+                if (ToggleOpenUrl.IsChecked ?? false)
+                {
+                    Windows.System.Launcher.LaunchUriAsync(new Uri(url));
+                }
             }
             catch
             {
             }
         }
 
-        private void listView1_ItemClick(object sender, ItemClickEventArgs e)
+        private void tryRotatePreview()
         {
-            var item = (e.ClickedItem as Scan);
-            tryOpenUrl(item.Text);
-        }
-        
-        private void captureElement_SizeChanged(object sender, SizeChangedEventArgs e)
-        {
-            /* http://stackoverflow.com/a/31431740 */
+            if (!_started)
+                return;
+
             try
             {
-                string currentorientation = Windows.Graphics.Display.DisplayInformation.GetForCurrentView().CurrentOrientation.ToString();
+                // http://stackoverflow.com/a/31431740
+                string currentorientation = DisplayInformation.GetForCurrentView().CurrentOrientation.ToString();
                 switch (currentorientation)
                 {
                     case "Landscape":
+                        _mediaCapture.SetRecordRotation(VideoRotation.None);
                         _mediaCapture.SetPreviewRotation(VideoRotation.None);
                         break;
                     case "Portrait":
+                        _mediaCapture.SetRecordRotation(VideoRotation.Clockwise90Degrees);
                         _mediaCapture.SetPreviewRotation(VideoRotation.Clockwise90Degrees);
                         break;
                     case "LandscapeFlipped":
+                        _mediaCapture.SetRecordRotation(VideoRotation.Clockwise180Degrees);
                         _mediaCapture.SetPreviewRotation(VideoRotation.Clockwise180Degrees);
                         break;
                     case "PortraitFlipped":
+                        _mediaCapture.SetRecordRotation(VideoRotation.Clockwise270Degrees);
                         _mediaCapture.SetPreviewRotation(VideoRotation.Clockwise270Degrees);
                         break;
                     default:
+                        _mediaCapture.SetRecordRotation(VideoRotation.None);
                         _mediaCapture.SetPreviewRotation(VideoRotation.None);
                         break;
                 }
-                //captureElement.Width = Math.Floor(Window.Current.Bounds.Width);
-                //captureElement.Height = Math.Floor(Window.Current.Bounds.Height);
+
+                if (_rotation != currentorientation)
+                {
+                    vlog("Camera Rotation: " + currentorientation);
+                    _rotation = currentorientation;
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                vlog(ex.Message);
             }
         }
 
-        private void buttonFocusAuto1_Checked(object sender, RoutedEventArgs e)
+        private void TogglePanel_Click(object sender, RoutedEventArgs e)
         {
-            focusSlider1.Visibility = Visibility.Collapsed;
-            try
-            {
-                _mediaCapture.VideoDeviceController.FocusControl.SetPresetAsync(Windows.Media.Devices.FocusPreset.AutoInfinity);
-            }
-            catch
-            {
-            }
+            splitView.IsPaneOpen = !splitView.IsPaneOpen;   
         }
 
-        private void buttonFocusAuto1_Unchecked(object sender, RoutedEventArgs e)
+        private void ToggleFlash_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                focusSlider1.Visibility = Visibility.Visible;
-                focusSlider1.Value = 100;
-            }
-            catch
-            {
-            }
+            var value = (sender as AppBarToggleButton).IsChecked;
+            vlog("ToggleFlash: " + value);
+
+            CameraStop();
+            CameraStart();
         }
 
-        private void Slider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+        private void ToggleHighResolution_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                var value = (sender as Slider).Value;
-                _mediaCapture.VideoDeviceController.FocusControl.SetPresetAsync(Windows.Media.Devices.FocusPreset.Manual);
-                _mediaCapture.VideoDeviceController.FocusControl.SetValueAsync((uint)value);
-                _mediaCapture.VideoDeviceController.FocusControl.Configure(new FocusSettings { Mode = FocusMode.Manual, Value = (uint)value, DisableDriverFallback = true });
-                _mediaCapture.VideoDeviceController.FocusControl.FocusAsync();
-            }
-            catch
-            {
-            }
+            var value = (sender as AppBarToggleButton).IsChecked;
+            vlog("ToggleHiRes: " + value);
+
+            CameraStop();
+            CameraStart();
         }
 
-        private void buttonFlash1_Checked(object sender, RoutedEventArgs e)
+        private void ToggleOpenUrl_Click(object sender, RoutedEventArgs e)
         {
-            var flashControl = _mediaCapture.VideoDeviceController.FlashControl;
-            if (!flashControl.Supported)
-            {
-                var msgbox = new MessageDialog("Flash is not available on this device. Try another!");
-                msgbox.ShowAsync();
-                buttonFlash1.IsChecked = false;
-            }
-
-            try
-            {
-                _mediaCapture.VideoDeviceController.FlashControl.Enabled = true;
-                _mediaCapture.VideoDeviceController.FlashControl.Auto = false;
-            }
-            catch
-            {
-            }
-        }
-
-        private void buttonFlash1_Unchecked(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                _mediaCapture.VideoDeviceController.FlashControl.Enabled = false;
-            }
-            catch
-            {
-            }
+            var value = (sender as AppBarToggleButton).IsChecked;
+            vlog("ToggleOpenUrl: " + value);
         }
     }
 }

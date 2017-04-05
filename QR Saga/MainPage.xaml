@@ -15,7 +15,7 @@
         </Grid.RowDefinitions>
         <Grid Grid.Row="0" Background="Black">
             <CaptureElement x:Name="captureElement" SizeChanged="captureElement_SizeChanged"  Stretch="UniformToFill" />
-            <Image Canvas.ZIndex="5" Source="Assets/crosshairs-red2.png" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Image Canvas.ZIndex="5" Source="Assets/crosshairs-red2.png" HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="100" MaxWidth="100" />
         </Grid>
         <Grid Grid.Row="1">
             <SplitView IsPaneOpen="False" DisplayMode="Inline" Name="splitView">
@@ -25,10 +25,10 @@
                 <ListView x:Name="listView1" IsItemClickEnabled="True" ItemClick="listView1_ItemClick" SelectionMode="None">
                     <ListView.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding Text}"/>
+                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
                         </DataTemplate>
                     </ListView.ItemTemplate>
-                    <local:Scan Text="Dev Item 1"/>
+                    <local:Scan Text="Dev Item 1 This long text needs to wrap so blah blah blah blah blah 123 zerglings blah tomato and something else bike cow morty portal space"/>
                     <local:Scan Text="Dev Item 2"/>
                 </ListView>
             </SplitView>

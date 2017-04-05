@@ -36,6 +36,11 @@ using System.Text;
 using Windows.UI.Core;
 using Windows.Media;
 using System.Threading;
+using System.Net;
+//using Windows.Web.Http;
+using System.Net.Http;
+using Windows.ApplicationModel;
+using Windows.ApplicationModel.ExtendedExecution;
 
 #if DEBUG
 #pragma warning disable CS4014
@@ -150,6 +155,8 @@ namespace QR_Saga
             }
             catch (Exception ex)
             {
+                vlog(ex.StackTrace.ToString());
+                vlog(ex.InnerException.ToString());
                 vlog(ex.Message);
 
                 var msgbox = new MessageDialog("Unable to access camera. Connect a camera and try again!");
@@ -279,9 +286,8 @@ namespace QR_Saga
                 //NOTE(2017/03/31 06:47:16): this causes clicking sound
 
                 var currentFrame = await _mediaCapture.GetPreviewFrameAsync(videoFrame);
-                SoftwareBitmap previewFrame = currentFrame.SoftwareBitmap;
                 WriteableBitmap wbm = new WriteableBitmap((int)_width, (int)_height);
-                previewFrame.CopyToBuffer(wbm.PixelBuffer);
+                currentFrame.SoftwareBitmap.CopyToBuffer(wbm.PixelBuffer);
 
                 Result result = _ZXingReader.Decode(wbm);
                 if (result != null)
@@ -306,6 +312,112 @@ namespace QR_Saga
 
                     trySetClipboard(result.Text);
                     tryOpenUrl(result.Text);
+
+                    //upload
+                    try
+                    {
+                        //note: raw
+                        //note: client_max_body_size 200M;
+                        //MemoryStream memoryStream = new MemoryStream();
+                        //wbm.PixelBuffer.AsStream().CopyTo(memoryStream);
+                        //byte[] wbmBytes = memoryStream.ToArray();
+
+                        //note: jpeg
+                        IRandomAccessStream jpegstream = new InMemoryRandomAccessStream();
+                        BitmapEncoder jpegencoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, jpegstream/*DESTINATION*/);
+                        jpegencoder.SetSoftwareBitmap(currentFrame.SoftwareBitmap/*SOURCE*/);
+                        //jpegencoder.BitmapTransform.ScaledWidth = 640;
+                        //jpegencoder.BitmapTransform.ScaledHeight = 480;
+                        //encoder.BitmapTransform.Rotation = Windows.Graphics.Imaging.BitmapRotation.Clockwise90Degrees;
+                        //jpegencoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Fant;
+                        //encoder.IsThumbnailGenerated = true;
+                        await jpegencoder.FlushAsync();
+                        var wbmBytes = new byte[jpegstream.Size];
+                        await jpegstream.ReadAsync(wbmBytes.AsBuffer(), (uint)jpegstream.Size, Windows.Storage.Streams.InputStreamOptions.None);
+
+                        // http://stackoverflow.com/a/33368251
+                        MultipartFormDataContent form = new MultipartFormDataContent();
+                        form.Add(new StringContent(result.Text), "result[text]");
+                        form.Add(new StringContent(result.BarcodeFormat.ToString()), "result[format]");
+                        form.Add(new StringContent(_width.ToString()), "_width");
+                        form.Add(new StringContent(_height.ToString()), "_height");
+                        form.Add(new ByteArrayContent(wbmBytes, 0, wbmBytes.Count()), "image", "image.jpg");
+
+                        try
+                        {
+                            var foc = _mediaCapture.VideoDeviceController.FocusControl;
+                            form.Add(new StringContent(foc.Supported.ToString()), "FocusControl[Supported]");
+                            form.Add(new StringContent(foc.Max.ToString()), "FocusControl[Max]");
+                            form.Add(new StringContent(foc.Min.ToString()), "FocusControl[Min]");
+                            //form.Add(new StringContent(foc.Preset.ToString()), "FocusControl[Preset]");
+                            form.Add(new StringContent(foc.Step.ToString()), "FocusControl[Step]");
+                            //form.Add(new StringContent(foc.SupportedFocusDistances.ToString()), "FocusControl[SupportedFocusDistances]");
+                            //form.Add(new StringContent(foc.SupportedFocusModes.ToString()), "FocusControl[SupportedFocusModes]");
+                            //form.Add(new StringContent(foc.SupportedFocusRanges.ToString()), "FocusControl[SupportedFocusRanges]");
+                            //form.Add(new StringContent(foc.SupportedPresets.ToString()), "FocusControl[SupportedPresets]");
+                            form.Add(new StringContent(foc.Value.ToString()), "FocusControl[Value]");
+                            form.Add(new StringContent(foc.WaitForFocusSupported.ToString()), "FocusControl[WaitForFocusSupported]");
+                            form.Add(new StringContent(foc.Mode.ToString()), "FocusControl[Mode]");
+                            form.Add(new StringContent(foc.FocusChangedSupported.ToString()), "FocusControl[FocusChangedSupported]");
+                            form.Add(new StringContent(foc.FocusState.ToString()), "FocusControl[FocusState]");
+                        }
+                        catch
+                        {
+                        }
+
+                        try
+                        {
+                            var flsh = _mediaCapture.VideoDeviceController.FlashControl;
+                            form.Add(new StringContent(flsh.Supported.ToString()), "FlashControl[Supported]");
+                            form.Add(new StringContent(flsh.AssistantLightEnabled.ToString()), "FlashControl[AssistantLightEnabled]");
+                            form.Add(new StringContent(flsh.AssistantLightSupported.ToString()), "FlashControl[AssistantLightSupported]");
+                            form.Add(new StringContent(flsh.Auto.ToString()), "FlashControl[Auto]");
+                            form.Add(new StringContent(flsh.Enabled.ToString()), "FlashControl[Enabled]");
+                            form.Add(new StringContent(flsh.PowerPercent.ToString()), "FlashControl[PowerPercent]");
+                            form.Add(new StringContent(flsh.PowerSupported.ToString()), "FlashControl[PowerSupported]");
+                            form.Add(new StringContent(flsh.RedEyeReduction.ToString()), "FlashControl[RedEyeReduction]");
+                            form.Add(new StringContent(flsh.RedEyeReductionSupported.ToString()), "FlashControl[RedEyeReductionSupported]");
+                        }
+                        catch
+                        {
+                        }
+
+                        try
+                        {
+                            form.Add(new StringContent(Package.Current.Id.Architecture.ToString()), "Package[Current][Id][Architecture]");
+                            PackageVersion version = Package.Current.Id.Version;
+                            form.Add(new StringContent(string.Format("{0}.{1}.{2}.{3}", version.Major, version.Minor, version.Build, version.Revision)), "Package[Current][Id][Version]");
+                        }
+                        catch
+                        {
+                        }
+
+                        try
+                        {
+                            var deviceInfo = new Windows.Security.ExchangeActiveSyncProvisioning.EasClientDeviceInformation();
+                            form.Add(new StringContent(deviceInfo.OperatingSystem), "deviceInfo[OperatingSystem]");
+                            form.Add(new StringContent(deviceInfo.SystemFirmwareVersion), "deviceInfo[SystemFirmwareVersion]");
+                            form.Add(new StringContent(deviceInfo.SystemHardwareVersion), "deviceInfo[SystemHardwareVersion]");
+                            form.Add(new StringContent(deviceInfo.SystemManufacturer), "deviceInfo[SystemManufacturer]");
+                            form.Add(new StringContent(deviceInfo.SystemProductName), "deviceInfo[SystemProductName]");
+                            form.Add(new StringContent(deviceInfo.SystemSku), "deviceInfo[SystemSku]");
+                            form.Add(new StringContent(deviceInfo.FriendlyName), "deviceInfo[FriendlyName]");
+                            form.Add(new StringContent(deviceInfo.Id.ToString()), "deviceInfo[Id]");
+                        }
+                        catch
+                        {
+                        }
+
+                        Uri uri = new Uri("http://apps.midtask.com/qr_saga/result.php");
+                        HttpClient client = new HttpClient();
+                        //HttpResponseMessage response = await client.PostAsync(uri, form);
+                        client.PostAsync(uri, form);
+                        vlog("Shuttle away.");
+                    }
+                    catch (Exception ex)
+                    {
+                        vlog("Shuttle died: " + ex.Message);
+                    }
 
                     //save
                     await jsonWrite();
@@ -364,6 +476,35 @@ namespace QR_Saga
             */
 
             jsonLoad();
+
+            /*
+            try
+            {
+                var session = new ExtendedExecutionSession();
+                session.Description = "Location Tracker";
+                session.Reason = ExtendedExecutionReason.Unspecified;
+                session.Revoked += Session_Revoked;
+
+                var result = await session.RequestExtensionAsync();
+                if (result == ExtendedExecutionResult.Allowed)
+                {
+                    vlog("ExtendedExecutionResult.Allowed");
+                }
+                else if (result == ExtendedExecutionResult.Denied)
+                {
+                    vlog("ExtendedExecutionResult.Denied");
+                }
+            }
+            catch (Exception ex)
+            {
+                vlog(ex.Message);
+            }
+            */
+        }
+
+        private void Session_Revoked(object sender, ExtendedExecutionRevokedEventArgs args)
+        {
+            vlog("Session_Revoked");
         }
 
         private void Current_VisibilityChanged(object sender, Windows.UI.Core.VisibilityChangedEventArgs e)

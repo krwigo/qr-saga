@@ -9,43 +9,63 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition MaxHeight="200"/>
             <RowDefinition/>
+            <RowDefinition Height="Auto" MaxHeight="200"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid Grid.Row="0" Background="Black">
-            <CaptureElement x:Name="captureElement" SizeChanged="captureElement_SizeChanged"  Stretch="UniformToFill" />
-            <Image Canvas.ZIndex="5" Source="Assets/crosshairs-red2.png" HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="100" MaxWidth="100" />
-        </Grid>
-        <Grid Grid.Row="1">
-            <SplitView IsPaneOpen="False" DisplayMode="Inline" Name="splitView">
-                <SplitView.Pane>
-                    <ListView x:Name="vlog1" />
-                </SplitView.Pane>
-                <ListView x:Name="listView1" IsItemClickEnabled="True" ItemClick="listView1_ItemClick" SelectionMode="None">
-                    <ListView.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                    <local:Scan Text="Dev Item 1 This long text needs to wrap so blah blah blah blah blah 123 zerglings blah tomato and something else bike cow morty portal space"/>
-                    <local:Scan Text="Dev Item 2"/>
-                </ListView>
-            </SplitView>
-        </Grid>
-        <Grid Grid.Row="2">
-            <CommandBar >
-                <AppBarButton Icon="List" Label="Toggle Log" Click="TogglePanel_Click"/>
-                <AppBarToggleButton Name="ToggleHighResolution" Icon="FontSize" Label="Toggle High Resolution" Click="ToggleHighResolution_Click"/>
-                <AppBarToggleButton Name="ToggleOpenUrl" Icon="SetLockScreen" Label="Toggle Open Url" Click="ToggleOpenUrl_Click" IsChecked="True"/>
-                <!--
-                <CommandBar.Content>
-                    <StackPanel Orientation="Vertical">
-                        <ComboBox Name="deviceList1" VerticalAlignment="Stretch"/>
-                    </StackPanel>
-                </CommandBar.Content>
--->
-            </CommandBar>
-        </Grid>
+
+        <CaptureElement x:Name="captureElement" SizeChanged="captureElement_SizeChanged"  Stretch="UniformToFill" Grid.RowSpan="2"/>
+        
+        <Image Canvas.ZIndex="5" Source="Assets/crosshairs-red2.png" HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="100" MaxWidth="100" Grid.RowSpan="2" />
+
+        <ListView 
+            x:Name="listLog" 
+            RequestedTheme="Dark" 
+            Background="#7F000000">
+            <x:String>Dev Item 1</x:String>
+            <x:String>Dev Item 2</x:String>
+            <x:String>Dev Item 3</x:String>
+        </ListView>
+
+        <ListView 
+            x:Name="listResults" 
+            RequestedTheme="Dark" 
+            Background="#7F000000" 
+            ItemClick="listView1_ItemClick"
+            IsItemClickEnabled="True" 
+            SelectionMode="None"
+            Grid.Row="1">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+            <local:Scan Text="Dev Item 1 This long text needs to wrap so blah blah blah blah blah 123 zerglings blah tomato and something else bike cow morty portal space"/>
+            <local:Scan Text="Dev Item 2"/>
+        </ListView>
+
+        <CommandBar Name="commandBar" VerticalAlignment="Bottom" RequestedTheme="Dark" Grid.Row="2" IsSticky="True">
+            <!-- Opening="CommandBar_Opening" -->
+            <CommandBar.PrimaryCommands>
+                <AppBarToggleButton Name="toggleLog" Icon="Admin" Label="Log" Click="toggleLog_Click"/>
+                <AppBarToggleButton Name="toggleResults" Icon="List" Label="Results" Click="toggleResults_Click" IsChecked="True"/>
+                <AppBarToggleButton Name="toggleHiRes" Icon="FontSize" Label="HiRes" Click="toggleHiRes_Click"/>
+                <AppBarToggleButton Name="toggleTorch" Icon="ShowResults" Label="Torch" Click="toggleTorch_Click"/>
+                <AppBarToggleButton Name="toggleClipboard" Icon="Copy" Label="Clipboard" Click="toggleClipboard_Click"/>
+                <AppBarToggleButton Name="toggleBrowser" Icon="SetLockScreen" Label="Browser" Click="toggleBrowser_Click"/>
+            </CommandBar.PrimaryCommands>
+            <CommandBar.SecondaryCommands>
+            </CommandBar.SecondaryCommands>
+        </CommandBar>
     </Grid>
 </Page>
+
+<!--
+                <AppBarButton Icon="Camera" Label="Select Device" AutomationProperties.Name="FlyoutDevices">
+                    <AppBarButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="Fit page" />
+                        </MenuFlyout>
+                    </AppBarButton.Flyout>
+                </AppBarButton>
+                    -->

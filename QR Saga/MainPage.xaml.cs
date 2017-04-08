@@ -25,7 +25,6 @@ using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Streams;
 using Windows.Devices.Enumeration;
 using Windows.Storage;
-using ZXing;
 using Windows.Graphics.Display;
 using Windows.ApplicationModel.Core;
 using Windows.UI;
@@ -41,6 +40,11 @@ using System.Net;
 using System.Net.Http;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.ExtendedExecution;
+using Windows.System.Threading;
+
+using ZXing;
+using ZXing.Mobile;
+using ZXing.Common;
 
 #if DEBUG
 #pragma warning disable CS4014
@@ -59,365 +63,276 @@ namespace QR_Saga
 
         public Scan() { }
     }
-
+    
     public sealed partial class MainPage : Page
     {
-        private List<Scan> m_Scans = new List<Scan>();
-
-        string _rotation;
+        IPropertySet _localSettings = null;
+        List<Scan> _scans = new List<Scan>();
+        InMemoryRandomAccessStream _stream = null;
+        ImageEncodingProperties _imgprop = null;
+        VideoFrame _videoframe = null;
+        WriteableBitmap _writablebm = null;
+        MediaCapture _mediaCapture = null;
+        BarcodeReader _reader = null;
         bool _started = false;
-        bool _focusing = false;
-        double _width = 640;
-        double _height = 480;
+        string _rotation = "";
 
-        MediaCapture _mediaCapture;
-        BarcodeReader _ZXingReader = new BarcodeReader();
-        DispatcherTimer _timerFocus = new DispatcherTimer();
-        //SemaphoreSlim _semRender = new SemaphoreSlim(1);
-        //SemaphoreSlim _semScan = new SemaphoreSlim(1);
+        //SemaphoreSlim _sem = new SemaphoreSlim(1);
 
         private void vlog(string x)
         {
             try
             {
-                vlog1.Items.Insert(0, DateTime.Now.ToString("ss.ff") + "| " + x);
+                listLog.Items.Insert(0, DateTime.Now.ToString("ss.ff") + "| " + x);
             }
             catch
             {
             }
         }
 
-        async Task CameraStart()
+        private void vex(string title, Exception ex)
+        {
+            try
+            {
+                StackTrace stacktrace = new StackTrace(ex, true);
+                StackFrame frame = stacktrace.GetFrames().LastOrDefault();
+                vlog("[EX:"+title+"] @" + frame.GetFileName() + ":" + frame.GetFileLineNumber() + "\n" + ex.ToString());
+            }
+            catch
+            {
+            }
+        }
+
+        public MainPage()
+        {
+            this.InitializeComponent();
+            this.Loaded += MainPage_Loaded;
+
+            listLog.Items.Clear();
+
+            vlog("mainPage()");
+
+            _reader = new BarcodeReader();
+            _reader.Options.PossibleFormats = new List<BarcodeFormat>();
+            _reader.Options.PossibleFormats.Add(BarcodeFormat.QR_CODE);
+
+            Window.Current.VisibilityChanged += Current_VisibilityChanged;
+            Window.Current.Activated += Current_Activated;
+        }
+
+        private void MainPage_Loaded(object sender, RoutedEventArgs e)
+        {
+            // ** Always
+            toggleHiRes.Visibility = Visibility.Collapsed;
+
+            commandBar.ClosedDisplayMode = AppBarClosedDisplayMode.Minimal;
+
+            // ** Settings
+            _localSettings = ApplicationData.Current.LocalSettings.Values;
+
+            //Windows.System.Launcher.LaunchFolderAsync(ApplicationData.Current.LocalFolder);
+
+            // ** Settings: toggleLog
+            if (!_localSettings.ContainsKey("toggleLog"))
+                _localSettings["toggleLog"] = false;
+            toggleLog.IsChecked = (bool)_localSettings["toggleLog"];
+            listLog.Visibility = toggleLog.IsChecked ?? false ? Visibility.Visible : Visibility.Collapsed;
+
+            // ** Settings: toggleResults
+            if (!_localSettings.ContainsKey("toggleResults"))
+                _localSettings["toggleResults"] = true;
+            toggleResults.IsChecked = (bool)_localSettings["toggleResults"];
+            listResults.Visibility = toggleResults.IsChecked ?? false ? Visibility.Visible : Visibility.Collapsed;
+
+            // ** Settings: toggleTorch
+            if (!_localSettings.ContainsKey("toggleTorch"))
+                _localSettings["toggleTorch"] = false;
+            toggleTorch.IsChecked = (bool)_localSettings["toggleTorch"];
+            doTorch();
+
+            // ** Settings: toggleBrowser
+            if (!_localSettings.ContainsKey("toggleBrowser"))
+                _localSettings["toggleBrowser"] = true;
+            toggleBrowser.IsChecked = (bool)_localSettings["toggleBrowser"];
+
+            // ** Settings: toggleClipboard
+            if (!_localSettings.ContainsKey("toggleClipboard"))
+                _localSettings["toggleClipboard"] = true;
+            toggleClipboard.IsChecked = (bool)_localSettings["toggleClipboard"];
+
+            // ** Settings: toggleHiRes
+            if (!_localSettings.ContainsKey("toggleHiRes"))
+                _localSettings["toggleHiRes"] = false;
+            toggleHiRes.IsChecked = (bool)_localSettings["toggleHiRes"];
+
+            // ** Results
+            jsonLoad();
+        }
+
+        private async Task cameraStart()
         {
             if (_started)
                 return;
-            vlog("CameraStart()");
-            _started = true;
 
-            // ** Devices List
-            /*
+            vlog("cameraStart()");
             try
             {
-                var devices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
-
-                //DeviceInformation frontCamera = null;
-                //DeviceInformation rearCamera = null;
-
-                deviceList1.Items.Clear();
-                foreach (var device in devices)
-                {
-                    deviceList1.Items.Add(device.Name);
-                    switch (device.EnclosureLocation.Panel)
-                    {
-                        case Windows.Devices.Enumeration.Panel.Front:
-                            //frontCamera = device;
-                            vlog("DeviceList(Front): " + device.Name);
-                            break;
-                        case Windows.Devices.Enumeration.Panel.Back:
-                            //rearCamera = device;
-                            vlog("DeviceList(Rear): " + device.Name);
-                            break;
-                    }
-                }
-                if (deviceList1.Items.Count > 0)
-                {
-                    deviceList1.SelectedIndex = 0;
-                }
-            }
-            catch(Exception ex)
-            {
-                vlog(ex.Message);
-            }
-            */
-
-            // ** INIT
-            try
-            {
-                // ** Devices
                 DeviceInformationCollection webcamList = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
                 DeviceInformation webcamDev = (from webcam in webcamList where webcam.IsEnabled select webcam).FirstOrDefault();
 
-                vlog("Device ID: " + webcamDev.Id);
-                vlog("Device Name: " + webcamDev.Name);
+                vlog("DevID: " + webcamDev.Id);
+                vlog("DevName: " + webcamDev.Name);
 
-                // ** MediaCapture
                 _mediaCapture = new MediaCapture();
 
                 await _mediaCapture.InitializeAsync(new MediaCaptureInitializationSettings
                 {
                     VideoDeviceId = webcamDev.Id,
-                    AudioDeviceId = "",
+                    AudioDeviceId = string.Empty,
                     StreamingCaptureMode = StreamingCaptureMode.Video,
-                    PhotoCaptureSource = PhotoCaptureSource.VideoPreview
+                    PhotoCaptureSource = PhotoCaptureSource.VideoPreview,
                 });
 
-                _mediaCapture.FocusChanged += _mediaCapture_FocusChanged;
-            }
-            catch (Exception ex)
-            {
-                vlog(ex.StackTrace.ToString());
-                vlog(ex.InnerException.ToString());
-                vlog(ex.Message);
+                double _width = 640;
+                double _height = 480;
 
-                var msgbox = new MessageDialog("Unable to access camera. Connect a camera and try again!");
-                await msgbox.ShowAsync();
-
-                _started = false;
-                return;
-            }
-
-            if (ToggleHighResolution.IsChecked ?? false)
-            {
-                vlog("High Resolution Is Checked");
-
+                // ** HiRes
+                /*
                 try
                 {
-                    // ** Camera Resolution
-                    var res = _mediaCapture.VideoDeviceController.GetAvailableMediaStreamProperties(MediaStreamType.VideoPreview);
-                    uint maxResolution = 0;
-                    int indexMaxResolution = 0;
-                    _width = 640;
-                    _height = 480;
-                    if (res.Count >= 1)
+                    if (toggleHiRes.IsChecked ?? false)
                     {
-                        for (int i = 0; i < res.Count; i++)
+                        uint pixels = 0;
+                        IReadOnlyList<IMediaEncodingProperties> m_SelectedResolutions = _mediaCapture.VideoDeviceController.GetAvailableMediaStreamProperties(MediaStreamType.VideoPreview);
+
+                        for (int i = 0; i < m_SelectedResolutions.Count; i++)
                         {
-                            VideoEncodingProperties vp = (VideoEncodingProperties)res[i];
-                            if (vp.Width > maxResolution)
+                            VideoEncodingProperties vp = (VideoEncodingProperties)m_SelectedResolutions[i];
+                            if (vp.Width * vp.Height > pixels)
                             {
-                                indexMaxResolution = i;
-                                maxResolution = vp.Width;
+                                pixels = vp.Width * vp.Height;
+                                await _mediaCapture.VideoDeviceController.SetMediaStreamPropertiesAsync(MediaStreamType.VideoPreview, vp);
+                                vlog(string.Format("DevRes: {0}x{1} fps:{2} bitrate:{3}", vp.Width, vp.Height, vp.FrameRate.Numerator, vp.Bitrate));
                                 _width = vp.Width;
                                 _height = vp.Height;
-                                vlog("Camera Resolution " + i + ": " + vp.Width + "x" + vp.Height);
                             }
                         }
-                        vlog("Using Camera Resolution " + indexMaxResolution);
-                        await _mediaCapture.VideoDeviceController.SetMediaStreamPropertiesAsync(MediaStreamType.VideoPreview, res[indexMaxResolution]);
                     }
                 }
-                catch (Exception ex)
+                catch(Exception ex)
                 {
-                    vlog(ex.Message);
+                    vex("HiRes", ex);
                 }
-            }
+                */
+                
+                _videoframe = new VideoFrame(BitmapPixelFormat.Bgra8, (int)_width, (int)_height);
+                _imgprop = new ImageEncodingProperties() { Subtype = "BMP" };
+                _stream = new InMemoryRandomAccessStream();
+                _writablebm = new WriteableBitmap((int)_width, (int)_height);
 
-            // ** Camera Flash
-            try
-            {
-                if (_mediaCapture.VideoDeviceController.FlashControl.Supported)
+                captureElement.Source = _mediaCapture;
+                await _mediaCapture.StartPreviewAsync();
+
+                _started = true;
+                cameraWorker();
+
+                // ** Rotate
+                doRotate();
+
+                // ** Torch
+                FlashControl flashControl = _mediaCapture.VideoDeviceController.FlashControl;
+                vlog("Support Torch: " + (flashControl.Supported ? "Yes" : "No"));
+                toggleTorch.IsEnabled = _mediaCapture.VideoDeviceController.FlashControl.Supported;
+                doTorch();
+
+                // ** Focus
+                try
                 {
-                    _mediaCapture.VideoDeviceController.FlashControl.Auto = false;
-                    _mediaCapture.VideoDeviceController.FlashControl.Enabled = false;
+                    FocusControl focusControl = _mediaCapture.VideoDeviceController.FocusControl;
+                    vlog("Support Focus: " + (focusControl.Supported ? "Yes" : "No"));
+                    if (focusControl.Supported)
+                    {
+                        //await mediaCapture.StartPreviewAsync();
+                        await focusControl.UnlockAsync();
+
+                        focusControl.Configure(new FocusSettings
+                        {
+                            Mode = FocusMode.Continuous,
+                            AutoFocusRange = AutoFocusRange.FullRange
+                        });
+                    }
+                }
+                catch
+                {
                 }
             }
             catch (Exception ex)
             {
-                vlog(ex.Message);
-            }
-
-            // ** Camera Rotation
-            tryRotatePreview();
-
-            // ** Camera Start
-            captureElement.Source = _mediaCapture;
-            captureElement.Stretch = Stretch.UniformToFill;
-            await _mediaCapture.StartPreviewAsync();
-
-            // ** Camera Worker
-            CameraWorker();
-
-            // ** Camera Focus
-            var focusControl = _mediaCapture.VideoDeviceController.FocusControl;
-            if (focusControl.FocusChangedSupported)
-            {
-                vlog("Camera Auto Focus");
-
-                //await mediaCapture.StartPreviewAsync();
-                await focusControl.UnlockAsync();
-
-                focusControl.Configure(new FocusSettings {
-                    Mode = FocusMode.Continuous,
-                    AutoFocusRange = AutoFocusRange.FullRange
-                });
-
-                await focusControl.FocusAsync();
-            }
-            else if (focusControl.Supported)
-            {
-                vlog("Camera Manual Focus");
-
-                //await mediaCapture.StartPreviewAsync();
-                await focusControl.UnlockAsync();
-
-                focusControl.Configure(new FocusSettings {
-                    Mode = FocusMode.Auto
-                });
-
-                _timerFocus.Interval = new TimeSpan(0, 0, 3);
-                _timerFocus.Start();
-            }
-            else
-            {
-                vlog("Camera Cannot Focus");
+                vex("DevInit", ex);
             }
         }
 
-        async Task CameraWorker()
+        async Task cameraStop()
         {
-            while (true)
+            if (_started)
             {
-                if (!_started)
-                    return;
+                _started = false;
+                vlog("cameraStop()");
+                await _mediaCapture.StopPreviewAsync();
+            }
+        }
 
-                var stream = new InMemoryRandomAccessStream();
-                var imgProp = new ImageEncodingProperties {
-                    Subtype = "BMP",
-                    Width = (uint)_width,
-                    Height = (uint)_height
-                };
+        async void cameraRestart()
+        {
+            await cameraStop();
+            await cameraStart();
+        }
 
-                VideoFrame videoFrame = new VideoFrame(BitmapPixelFormat.Bgra8, (int)_width, (int)_height);
-                //await _mediaCapture.GetPreviewFrameAsync(videoFrame);
-                //await _mediaCapture.CapturePhotoToStreamAsync(imgProp, stream);
-                //stream.Seek(0);
-                //var wbm = new WriteableBitmap((int)_width, (int)_height); //600, 800
-                //await wbm.SetSourceAsync(stream);
-                //NOTE(2017/03/31 06:47:16): this causes clicking sound
+        private async Task cameraWorker()
+        {
+            if (!_started)
+            {
+                vlog("cameraWorker(): stop");
+                return;
+            }
 
-                var currentFrame = await _mediaCapture.GetPreviewFrameAsync(videoFrame);
-                WriteableBitmap wbm = new WriteableBitmap((int)_width, (int)_height);
-                currentFrame.SoftwareBitmap.CopyToBuffer(wbm.PixelBuffer);
+            try
+            {
+                //note(2017/03/31 06:47:16): CapturePhotoToStreamAsync() causes clicking sound
 
-                Result result = _ZXingReader.Decode(wbm);
+                VideoFrame currentFrame = await _mediaCapture.GetPreviewFrameAsync(_videoframe);
+
+                //color (ZXing)
+                //currentFrame.SoftwareBitmap.CopyToBuffer(_wbm.PixelBuffer);
+                //Result result = _ZXingReader.Decode(_wbm);
+
+                //grayscale (ZXing.Mobile)
+                SoftwareBitmapLuminanceSource luminanceSource = new SoftwareBitmapLuminanceSource(_videoframe.SoftwareBitmap);
+                Result result = _reader.Decode(luminanceSource);
+
                 if (result != null)
                 {
                     vlog("Scan Result: " + result.Text);
 
                     //delete
-                    for (int i = m_Scans.Count - 1; i >= 0; i--)
+                    for (int i = _scans.Count - 1; i >= 0; i--)
                     {
-                        if (result.Text == m_Scans[i].Text)
+                        if (result.Text == _scans[i].Text)
                         {
-                            m_Scans.RemoveAt(i);
+                            _scans.RemoveAt(i);
                         }
                     }
 
                     //insert
                     var item = new Scan() { Text = result.Text, Date = DateTime.Now.ToString("MM/dd/yyyy hh:mm") };
-                    m_Scans.Insert(0, item);
-                    listView1.ItemsSource = null;
-                    listView1.ItemsSource = m_Scans;
-                    listView1.ScrollIntoView(item);
+                    _scans.Insert(0, item);
+                    listResults.ItemsSource = null;
+                    listResults.ItemsSource = _scans;
+                    listResults.ScrollIntoView(item);
 
-                    trySetClipboard(result.Text);
-                    tryOpenUrl(result.Text);
-
-                    //upload
-                    try
-                    {
-                        //note: raw
-                        //note: client_max_body_size 200M;
-                        //MemoryStream memoryStream = new MemoryStream();
-                        //wbm.PixelBuffer.AsStream().CopyTo(memoryStream);
-                        //byte[] wbmBytes = memoryStream.ToArray();
-
-                        //note: jpeg
-                        IRandomAccessStream jpegstream = new InMemoryRandomAccessStream();
-                        BitmapEncoder jpegencoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, jpegstream/*DESTINATION*/);
-                        jpegencoder.SetSoftwareBitmap(currentFrame.SoftwareBitmap/*SOURCE*/);
-                        //jpegencoder.BitmapTransform.ScaledWidth = 640;
-                        //jpegencoder.BitmapTransform.ScaledHeight = 480;
-                        //encoder.BitmapTransform.Rotation = Windows.Graphics.Imaging.BitmapRotation.Clockwise90Degrees;
-                        //jpegencoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Fant;
-                        //encoder.IsThumbnailGenerated = true;
-                        await jpegencoder.FlushAsync();
-                        var wbmBytes = new byte[jpegstream.Size];
-                        await jpegstream.ReadAsync(wbmBytes.AsBuffer(), (uint)jpegstream.Size, Windows.Storage.Streams.InputStreamOptions.None);
-
-                        // http://stackoverflow.com/a/33368251
-                        MultipartFormDataContent form = new MultipartFormDataContent();
-                        form.Add(new StringContent(result.Text), "result[text]");
-                        form.Add(new StringContent(result.BarcodeFormat.ToString()), "result[format]");
-                        form.Add(new StringContent(_width.ToString()), "_width");
-                        form.Add(new StringContent(_height.ToString()), "_height");
-                        form.Add(new ByteArrayContent(wbmBytes, 0, wbmBytes.Count()), "image", "image.jpg");
-
-                        try
-                        {
-                            var foc = _mediaCapture.VideoDeviceController.FocusControl;
-                            form.Add(new StringContent(foc.Supported.ToString()), "FocusControl[Supported]");
-                            form.Add(new StringContent(foc.Max.ToString()), "FocusControl[Max]");
-                            form.Add(new StringContent(foc.Min.ToString()), "FocusControl[Min]");
-                            //form.Add(new StringContent(foc.Preset.ToString()), "FocusControl[Preset]");
-                            form.Add(new StringContent(foc.Step.ToString()), "FocusControl[Step]");
-                            //form.Add(new StringContent(foc.SupportedFocusDistances.ToString()), "FocusControl[SupportedFocusDistances]");
-                            //form.Add(new StringContent(foc.SupportedFocusModes.ToString()), "FocusControl[SupportedFocusModes]");
-                            //form.Add(new StringContent(foc.SupportedFocusRanges.ToString()), "FocusControl[SupportedFocusRanges]");
-                            //form.Add(new StringContent(foc.SupportedPresets.ToString()), "FocusControl[SupportedPresets]");
-                            form.Add(new StringContent(foc.Value.ToString()), "FocusControl[Value]");
-                            form.Add(new StringContent(foc.WaitForFocusSupported.ToString()), "FocusControl[WaitForFocusSupported]");
-                            form.Add(new StringContent(foc.Mode.ToString()), "FocusControl[Mode]");
-                            form.Add(new StringContent(foc.FocusChangedSupported.ToString()), "FocusControl[FocusChangedSupported]");
-                            form.Add(new StringContent(foc.FocusState.ToString()), "FocusControl[FocusState]");
-                        }
-                        catch
-                        {
-                        }
-
-                        try
-                        {
-                            var flsh = _mediaCapture.VideoDeviceController.FlashControl;
-                            form.Add(new StringContent(flsh.Supported.ToString()), "FlashControl[Supported]");
-                            form.Add(new StringContent(flsh.AssistantLightEnabled.ToString()), "FlashControl[AssistantLightEnabled]");
-                            form.Add(new StringContent(flsh.AssistantLightSupported.ToString()), "FlashControl[AssistantLightSupported]");
-                            form.Add(new StringContent(flsh.Auto.ToString()), "FlashControl[Auto]");
-                            form.Add(new StringContent(flsh.Enabled.ToString()), "FlashControl[Enabled]");
-                            form.Add(new StringContent(flsh.PowerPercent.ToString()), "FlashControl[PowerPercent]");
-                            form.Add(new StringContent(flsh.PowerSupported.ToString()), "FlashControl[PowerSupported]");
-                            form.Add(new StringContent(flsh.RedEyeReduction.ToString()), "FlashControl[RedEyeReduction]");
-                            form.Add(new StringContent(flsh.RedEyeReductionSupported.ToString()), "FlashControl[RedEyeReductionSupported]");
-                        }
-                        catch
-                        {
-                        }
-
-                        try
-                        {
-                            form.Add(new StringContent(Package.Current.Id.Architecture.ToString()), "Package[Current][Id][Architecture]");
-                            PackageVersion version = Package.Current.Id.Version;
-                            form.Add(new StringContent(string.Format("{0}.{1}.{2}.{3}", version.Major, version.Minor, version.Build, version.Revision)), "Package[Current][Id][Version]");
-                        }
-                        catch
-                        {
-                        }
-
-                        try
-                        {
-                            var deviceInfo = new Windows.Security.ExchangeActiveSyncProvisioning.EasClientDeviceInformation();
-                            form.Add(new StringContent(deviceInfo.OperatingSystem), "deviceInfo[OperatingSystem]");
-                            form.Add(new StringContent(deviceInfo.SystemFirmwareVersion), "deviceInfo[SystemFirmwareVersion]");
-                            form.Add(new StringContent(deviceInfo.SystemHardwareVersion), "deviceInfo[SystemHardwareVersion]");
-                            form.Add(new StringContent(deviceInfo.SystemManufacturer), "deviceInfo[SystemManufacturer]");
-                            form.Add(new StringContent(deviceInfo.SystemProductName), "deviceInfo[SystemProductName]");
-                            form.Add(new StringContent(deviceInfo.SystemSku), "deviceInfo[SystemSku]");
-                            form.Add(new StringContent(deviceInfo.FriendlyName), "deviceInfo[FriendlyName]");
-                            form.Add(new StringContent(deviceInfo.Id.ToString()), "deviceInfo[Id]");
-                        }
-                        catch
-                        {
-                        }
-
-                        Uri uri = new Uri("http://apps.midtask.com/qr_saga/result.php");
-                        HttpClient client = new HttpClient();
-                        //HttpResponseMessage response = await client.PostAsync(uri, form);
-                        client.PostAsync(uri, form);
-                        vlog("Shuttle away.");
-                    }
-                    catch (Exception ex)
-                    {
-                        vlog("Shuttle died: " + ex.Message);
-                    }
+                    doClipboard(result.Text);
+                    doBrowser(result.Text);
+                    await doUpload(result, currentFrame);
 
                     //save
                     await jsonWrite();
@@ -427,137 +342,45 @@ namespace QR_Saga
                     await msgbox.ShowAsync();
                 }
             }
-        }
-        
-        private void _mediaCapture_FocusChanged(MediaCapture sender, MediaCaptureFocusChangedEventArgs args)
-        {
-            vlog("FocusChanged: "+ args.FocusState);
-        }
-
-        async Task CameraStop()
-        {
-            if (!_started)
-                return;
-            vlog("CameraStop()");
-            _started = false;
-
-            _timerFocus.Stop();
-
-            await _mediaCapture.StopPreviewAsync();
-
-            _mediaCapture.FocusChanged -= _mediaCapture_FocusChanged;
-            _mediaCapture.Dispose();
-            _mediaCapture = null;
-        }
-
-        public MainPage()
-        {
-            this.InitializeComponent();
-            this.Loaded += MainPage_Loaded;
-
-            vlog("MainPage()");
-
-            Window.Current.VisibilityChanged += Current_VisibilityChanged;
-            Window.Current.Activated += Current_Activated;
-
-            _timerFocus.Tick += timerFocus_Tick;
-        }
-
-        private void MainPage_Loaded(object sender, RoutedEventArgs e)
-        {
-            // ** User Settings
-            /*
-            ApplicationDataContainer AppSettings = ApplicationData.Current.LocalSettings;
-
-            if (AppSettings.Values.ContainsKey("musicV"))
-            {
-                musicVolume.Value = (double)AppSettings.Values["musicV"];
-            }
-            */
-
-            jsonLoad();
-
-            /*
-            try
-            {
-                var session = new ExtendedExecutionSession();
-                session.Description = "Location Tracker";
-                session.Reason = ExtendedExecutionReason.Unspecified;
-                session.Revoked += Session_Revoked;
-
-                var result = await session.RequestExtensionAsync();
-                if (result == ExtendedExecutionResult.Allowed)
-                {
-                    vlog("ExtendedExecutionResult.Allowed");
-                }
-                else if (result == ExtendedExecutionResult.Denied)
-                {
-                    vlog("ExtendedExecutionResult.Denied");
-                }
-            }
             catch (Exception ex)
             {
-                vlog(ex.Message);
+                vex("cameraWorker", ex);
             }
-            */
-        }
 
-        private void Session_Revoked(object sender, ExtendedExecutionRevokedEventArgs args)
-        {
-            vlog("Session_Revoked");
+            cameraWorker();
         }
 
         private void Current_VisibilityChanged(object sender, Windows.UI.Core.VisibilityChangedEventArgs e)
         {
-            CameraStop();
+            cameraStop();
         }
 
         private void Current_Activated(object sender, WindowActivatedEventArgs e)
         {
-            CameraStart();
-        }
-
-        private async void timerFocus_Tick(object sender, object e)
-        {
-            if (!_started)
-                return;
-            if (_focusing)
-                return;
-            vlog("Tick");
-            _focusing = true;
-
-            try
-            {
-                await _mediaCapture.VideoDeviceController.FocusControl.FocusAsync();
-            }
-            catch
-            {
-            }
-
-            _focusing = false;
-        }
-
-        private void listView1_ItemClick(object sender, ItemClickEventArgs e)
-        {
-            vlog("ItemClick");
-            var item = (e.ClickedItem as Scan);
-            trySetClipboard(item.Text);
-            tryOpenUrl(item.Text);
+            cameraStart();
         }
         
+        private void listView1_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            vlog("itemClick");
+            Scan item = (e.ClickedItem as Scan);
+            doClipboard(item.Text);
+            doBrowser(item.Text);
+        }
+
         private void captureElement_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            tryRotatePreview();
+            doRotate();
         }
 
         private async Task jsonWrite()
         {
             try
             {
-                var serializer = new DataContractJsonSerializer(typeof(List<Scan>));
-                using (var stream = await ApplicationData.Current.LocalFolder.OpenStreamForWriteAsync("data.json", CreationCollisionOption.ReplaceExisting))
+                DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(List<Scan>));
+                using (Stream stream = await ApplicationData.Current.LocalFolder.OpenStreamForWriteAsync("data.json", CreationCollisionOption.ReplaceExisting))
                 {
-                    serializer.WriteObject(stream, m_Scans);
+                    serializer.WriteObject(stream, _scans);
                 }
             }
             catch
@@ -569,28 +392,28 @@ namespace QR_Saga
         {
             try
             {
-                var jsonSerializer = new DataContractJsonSerializer(typeof(List<Scan>));
-                var myStream = await ApplicationData.Current.LocalFolder.OpenStreamForReadAsync("data.json");
+                DataContractJsonSerializer jsonSerializer = new DataContractJsonSerializer(typeof(List<Scan>));
+                Stream myStream = await ApplicationData.Current.LocalFolder.OpenStreamForReadAsync("data.json");
 
-                m_Scans = (List<Scan>)jsonSerializer.ReadObject(myStream);
+                _scans = (List<Scan>)jsonSerializer.ReadObject(myStream);
             }
             catch
             {
             }
 
-            if (m_Scans.Count <= 0)
+            if (_scans.Count <= 0)
             {
-                m_Scans.Add(new Scan() { Text = "http://apps.midtask.com/" });
+                _scans.Add(new Scan() { Text = "http://apps.midtask.com/" });
             }
 
-            listView1.ItemsSource = m_Scans;
+            listResults.ItemsSource = _scans;
         }
 
-        private void trySetClipboard(string text)
+        private void doClipboard(string text)
         {
             try
             {
-                var dataPackage = new DataPackage();
+                DataPackage dataPackage = new DataPackage();
                 dataPackage.SetText(text);
                 Clipboard.SetContent(dataPackage);
             }
@@ -599,11 +422,11 @@ namespace QR_Saga
             }
         }
 
-        private void tryOpenUrl(string url)
+        private void doBrowser(string url)
         {
             try
             {
-                if (ToggleOpenUrl.IsChecked ?? false)
+                if (toggleBrowser.IsChecked ?? false)
                 {
                     Windows.System.Launcher.LaunchUriAsync(new Uri(url));
                 }
@@ -613,7 +436,7 @@ namespace QR_Saga
             }
         }
 
-        private void tryRotatePreview()
+        private void doRotate()
         {
             if (!_started)
                 return;
@@ -648,7 +471,7 @@ namespace QR_Saga
 
                 if (_rotation != currentorientation)
                 {
-                    vlog("Camera Rotation: " + currentorientation);
+                    vlog("Rotation: " + currentorientation);
                     _rotation = currentorientation;
                 }
             }
@@ -658,33 +481,383 @@ namespace QR_Saga
             }
         }
 
-        private void TogglePanel_Click(object sender, RoutedEventArgs e)
+        private async Task doUpload(Result result, VideoFrame currentFrame)
         {
-            splitView.IsPaneOpen = !splitView.IsPaneOpen;   
+            try
+            {
+                //note: raw
+                //note: client_max_body_size 200M;
+                //MemoryStream memoryStream = new MemoryStream();
+                //wbm.PixelBuffer.AsStream().CopyTo(memoryStream);
+                //byte[] wbmBytes = memoryStream.ToArray();
+
+                //note: jpeg
+                IRandomAccessStream enc_stream = new InMemoryRandomAccessStream();
+                BitmapEncoder enc_encoder = await BitmapEncoder.CreateAsync(
+                    BitmapEncoder.PngEncoderId/*BitmapEncoder.JpegEncoderId*/,
+                    enc_stream/*dst*/
+                    );
+                enc_encoder.SetSoftwareBitmap(
+                    currentFrame.SoftwareBitmap/*src*/
+                    );
+                //enc_encoder.BitmapTransform.ScaledWidth = 640;
+                //enc_encoder.BitmapTransform.ScaledHeight = 480;
+                //enc_encoder.BitmapTransform.Rotation = Windows.Graphics.Imaging.BitmapRotation.Clockwise90Degrees;
+                //enc_encoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Fant;
+
+                await enc_encoder.FlushAsync();
+                var wbmBytes = new byte[enc_stream.Size];
+                await enc_stream.ReadAsync(wbmBytes.AsBuffer(), (uint)enc_stream.Size, Windows.Storage.Streams.InputStreamOptions.None);
+
+                // http://stackoverflow.com/a/33368251
+                MultipartFormDataContent form = new MultipartFormDataContent();
+                form.Add(new StringContent(result.Text), "result[text]");
+                form.Add(new StringContent(result.BarcodeFormat.ToString()), "result[format]");
+                form.Add(new ByteArrayContent(wbmBytes, 0, wbmBytes.Count()), "image", "image.png");
+
+                try
+                {
+                    var foc = _mediaCapture.VideoDeviceController.FocusControl;
+                    form.Add(new StringContent(foc.Supported.ToString()), "FocusControl[Supported]");
+                    form.Add(new StringContent(foc.Max.ToString()), "FocusControl[Max]");
+                    form.Add(new StringContent(foc.Min.ToString()), "FocusControl[Min]");
+                    //form.Add(new StringContent(foc.Preset.ToString()), "FocusControl[Preset]");
+                    form.Add(new StringContent(foc.Step.ToString()), "FocusControl[Step]");
+                    //form.Add(new StringContent(foc.SupportedFocusDistances.ToString()), "FocusControl[SupportedFocusDistances]");
+                    //form.Add(new StringContent(foc.SupportedFocusModes.ToString()), "FocusControl[SupportedFocusModes]");
+                    //form.Add(new StringContent(foc.SupportedFocusRanges.ToString()), "FocusControl[SupportedFocusRanges]");
+                    //form.Add(new StringContent(foc.SupportedPresets.ToString()), "FocusControl[SupportedPresets]");
+                    form.Add(new StringContent(foc.Value.ToString()), "FocusControl[Value]");
+                    form.Add(new StringContent(foc.WaitForFocusSupported.ToString()), "FocusControl[WaitForFocusSupported]");
+                    form.Add(new StringContent(foc.Mode.ToString()), "FocusControl[Mode]");
+                    form.Add(new StringContent(foc.FocusChangedSupported.ToString()), "FocusControl[FocusChangedSupported]");
+                    form.Add(new StringContent(foc.FocusState.ToString()), "FocusControl[FocusState]");
+                }
+                catch (Exception ex)
+                {
+                }
+
+                try
+                {
+                    var flsh = _mediaCapture.VideoDeviceController.FlashControl;
+                    form.Add(new StringContent(flsh.Supported.ToString()), "FlashControl[Supported]");
+                    form.Add(new StringContent(flsh.AssistantLightEnabled.ToString()), "FlashControl[AssistantLightEnabled]");
+                    form.Add(new StringContent(flsh.AssistantLightSupported.ToString()), "FlashControl[AssistantLightSupported]");
+                    form.Add(new StringContent(flsh.Auto.ToString()), "FlashControl[Auto]");
+                    form.Add(new StringContent(flsh.Enabled.ToString()), "FlashControl[Enabled]");
+                    form.Add(new StringContent(flsh.PowerPercent.ToString()), "FlashControl[PowerPercent]");
+                    form.Add(new StringContent(flsh.PowerSupported.ToString()), "FlashControl[PowerSupported]");
+                    form.Add(new StringContent(flsh.RedEyeReduction.ToString()), "FlashControl[RedEyeReduction]");
+                    form.Add(new StringContent(flsh.RedEyeReductionSupported.ToString()), "FlashControl[RedEyeReductionSupported]");
+                }
+                catch (Exception ex)
+                {
+                }
+
+                try
+                {
+                    form.Add(new StringContent(Package.Current.Id.Architecture.ToString()), "Package[Current][Id][Architecture]");
+                    PackageVersion version = Package.Current.Id.Version;
+                    form.Add(new StringContent(string.Format("{0}.{1}.{2}.{3}", version.Major, version.Minor, version.Build, version.Revision)), "Package[Current][Id][Version]");
+                }
+                catch (Exception ex)
+                {
+                }
+
+                try
+                {
+                    var deviceInfo = new Windows.Security.ExchangeActiveSyncProvisioning.EasClientDeviceInformation();
+                    form.Add(new StringContent(deviceInfo.OperatingSystem), "deviceInfo[OperatingSystem]");
+                    form.Add(new StringContent(deviceInfo.SystemFirmwareVersion), "deviceInfo[SystemFirmwareVersion]");
+                    form.Add(new StringContent(deviceInfo.SystemHardwareVersion), "deviceInfo[SystemHardwareVersion]");
+                    form.Add(new StringContent(deviceInfo.SystemManufacturer), "deviceInfo[SystemManufacturer]");
+                    form.Add(new StringContent(deviceInfo.SystemProductName), "deviceInfo[SystemProductName]");
+                    form.Add(new StringContent(deviceInfo.SystemSku), "deviceInfo[SystemSku]");
+                    form.Add(new StringContent(deviceInfo.FriendlyName), "deviceInfo[FriendlyName]");
+                    form.Add(new StringContent(deviceInfo.Id.ToString()), "deviceInfo[Id]");
+                }
+                catch (Exception ex)
+                {
+                }
+
+                Uri uri = new Uri("http://apps.midtask.com/qr_saga/result.php");
+                HttpClient client = new HttpClient();
+                ////HttpResponseMessage response = await client.PostAsync(uri, form);
+                client.PostAsync(uri, form);
+            }
+            catch (Exception ex)
+            {
+                vex("doUpload", ex);
+            }
         }
 
-        private void ToggleFlash_Click(object sender, RoutedEventArgs e)
+        private void doTorch()
         {
-            var value = (sender as AppBarToggleButton).IsChecked;
-            vlog("ToggleFlash: " + value);
-
-            CameraStop();
-            CameraStart();
+            try
+            {
+                if (_mediaCapture.VideoDeviceController.FlashControl.Supported)
+                {
+                    _mediaCapture.VideoDeviceController.FlashControl.Enabled = toggleTorch.IsChecked ?? false;
+                    _mediaCapture.VideoDeviceController.FlashControl.Auto = false;
+                }
+            }
+            catch
+            {
+            }
         }
 
-        private void ToggleHighResolution_Click(object sender, RoutedEventArgs e)
+        private void toggleClipboard_Click(object sender, RoutedEventArgs e)
         {
-            var value = (sender as AppBarToggleButton).IsChecked;
-            vlog("ToggleHiRes: " + value);
-
-            CameraStop();
-            CameraStart();
+            AppBarToggleButton b = (AppBarToggleButton)sender;
+            vlog("toggleClipboard: " + b.IsChecked);
+            _localSettings["toggleClipboard"] = b.IsChecked;
         }
 
-        private void ToggleOpenUrl_Click(object sender, RoutedEventArgs e)
+        private void toggleTorch_Click(object sender, RoutedEventArgs e)
         {
-            var value = (sender as AppBarToggleButton).IsChecked;
-            vlog("ToggleOpenUrl: " + value);
+            AppBarToggleButton b = (AppBarToggleButton)sender;
+            vlog("toggleTorch: " + b.IsChecked);
+            _localSettings["toggleTorch"] = b.IsChecked;
+            doTorch();
         }
+
+        private void toggleHiRes_Click(object sender, RoutedEventArgs e)
+        {
+            AppBarToggleButton b = (AppBarToggleButton)sender;
+            vlog("toggleHiRes: " + b.IsChecked);
+            _localSettings["toggleHiRes"] = b.IsChecked;
+            cameraRestart();
+        }
+
+        private void toggleBrowser_Click(object sender, RoutedEventArgs e)
+        {
+            AppBarToggleButton b = (AppBarToggleButton)sender;
+            vlog("toggleBrowser: " + b.IsChecked);
+            _localSettings["toggleBrowser"] = b.IsChecked;
+        }
+
+        private void toggleLog_Click(object sender, RoutedEventArgs e)
+        {
+            listLog.Visibility = toggleLog.IsChecked ?? false ? Visibility.Visible : Visibility.Collapsed;
+            _localSettings["toggleLog"] = toggleLog.IsChecked;
+        }
+
+        private void toggleResults_Click(object sender, RoutedEventArgs e)
+        {
+            listResults.Visibility = toggleResults.IsChecked ?? false ? Visibility.Visible : Visibility.Collapsed;
+            _localSettings["toggleResults"] = toggleResults.IsChecked;
+        }
+
+        /*
+        private async void CommandBar_Opening(object sender, object e)
+        {
+            CommandBar c = (CommandBar)sender;
+
+            // ** Remove
+            c.SecondaryCommands.Clear();
+
+            // ** Devices
+            var devices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+            foreach (var device in devices)
+            {
+                var bDev = new AppBarToggleButton()
+                {
+                    Label = device.Name,
+                    Content = device.Id,
+                    IsChecked = (device.Id == m_SelectedDevice)
+                };
+                bDev.Click += BDev_Click;
+                c.SecondaryCommands.Add(bDev);
+            }
+
+            return;
+
+            // ** Resolutions
+            if (c.SecondaryCommands.Count > 0 && m_SelectedDevice != "")
+            {
+                c.SecondaryCommands.Add(new AppBarSeparator());
+                try
+                {
+                    for (int i = 0; i < m_SelectedResolutions.Count; i++)
+                    {
+                        VideoEncodingProperties vp = (VideoEncodingProperties)m_SelectedResolutions[i];
+                        string resfmt = string.Format("{0}x{1} {2}fps {3}br", vp.Width, vp.Height, vp.FrameRate.Numerator, vp.Bitrate);
+                        var bRes = new AppBarToggleButton()
+                        {
+                            Label = resfmt,
+                            Content = resfmt,
+                            IsChecked = (resfmt == m_SelectedResolution)
+                        };
+                        bRes.Click += BRes_Click; ;
+                        c.SecondaryCommands.Add(bRes);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private void BDev_Click(object sender, RoutedEventArgs e)
+        {
+            //AppBarToggleButton b = (AppBarToggleButton)sender;
+            //m_SelectedDevice = (string)b.Content;
+            //CameraStop();
+            //CameraStart();
+        }
+
+        private void BRes_Click(object sender, RoutedEventArgs e)
+        {
+            //AppBarToggleButton b = (AppBarToggleButton)sender;
+            //m_SelectedResolution = (string)b.Content;
+            //CameraStop();
+            //CameraStart();
+        }
+        */
     }
 }
+
+/*
+        private async Task CameraStart_old()
+        {
+            vlog("CameraStart()");
+
+            // ** INIT
+            try
+            {
+                // ** Device
+                    DeviceInformationCollection webcamList = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+                DeviceInformation webcamDev = (from webcam in webcamList where webcam.IsEnabled select webcam).FirstOrDefault();
+
+                vlog("Dev ID: " + webcamDev.Id);
+                vlog("Dev Name: " + webcamDev.Name);
+
+                // ** MediaCapture
+                _mediaCapture = new MediaCapture();
+                await _mediaCapture.InitializeAsync(new MediaCaptureInitializationSettings
+                {
+                    VideoDeviceId = webcamDev.Id,
+                    AudioDeviceId = string.Empty,
+                    //StreamingCaptureMode = StreamingCaptureMode.Video,
+                    //PhotoCaptureSource = PhotoCaptureSource.VideoPreview
+                });
+
+                /*
+                _external = false;
+                _mirrored = false;
+                if (webcamDev.EnclosureLocation == null || webcamDev.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Unknown)
+                {
+                    _external = true;
+                }
+                else
+                {
+                    // Only mirror the preview if the camera is on the front panel
+                    _mirrored = (webcamDev.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Front);
+                }
+                vlog(string.Format("Dev Panel: {0}, {1}", (_external ? "External" : "Internal"), (_mirrored ? "Front" : "Rear")));
+                /
+
+                vlog("CameraStart(): Success");
+            }
+            catch (Exception ex)
+            {
+                //vlog("EX1: " + ex.ToString());
+                vex("DevInit", ex);
+
+var msgbox = new MessageDialog("Unable to access camera. Connect a camera and try again!");
+await msgbox.ShowAsync();
+
+                return;
+            }
+
+            /*
+            // ** Camera Resolution
+            try
+            {
+                if (ToggleHiRes.IsChecked ?? false)
+                {
+                    _best = null;
+                    m_SelectedResolutions = _mediaCapture.VideoDeviceController.GetAvailableMediaStreamProperties(MediaStreamType.VideoPreview);
+                    for (int i = 0; i < m_SelectedResolutions.Count; i++)
+                    {
+                        VideoEncodingProperties vp = (VideoEncodingProperties)m_SelectedResolutions[i];
+                        if (
+                            (_best == null) ||
+                            (
+                                (vp.FrameRate.Numerator >= _best.FrameRate.Numerator) &&
+                                (vp.Width + vp.Height >= _best.Width + _best.Height) &&
+                                (vp.Bitrate >= _best.Bitrate)
+                            )
+                        )
+                        {
+                            _best = vp;
+                        }
+                    }
+
+                    await _mediaCapture.VideoDeviceController.SetMediaStreamPropertiesAsync(MediaStreamType.VideoPreview, _best);
+                    vlog(string.Format("Dev Res: {0}x{1} fps:{2} bitrate:{3}", _best.Width, _best.Height, _best.FrameRate.Numerator, _best.Bitrate));
+                    _width = _best.Width;
+                    _height = _best.Height;
+                }
+            }
+            catch (Exception ex)
+            {
+                vlog("CameraStart()[res1]: " + ex.ToString());
+            }
+            */
+
+            // ** Camera Rotation
+            //tryRotatePreview();
+
+            // ** Camera Flash
+            /*
+            try
+            {
+                vlog("Support Flash: " + (_mediaCapture.VideoDeviceController.FlashControl.Supported ? "Yes" : "No"));
+                if (_mediaCapture.VideoDeviceController.FlashControl.Supported)
+                {
+                    _mediaCapture.VideoDeviceController.FlashControl.Auto = false;
+                    _mediaCapture.VideoDeviceController.FlashControl.Enabled = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                vlog("CameraStart()[res2]: " + ex.ToString());
+            }
+            /
+
+            // ** Camera Start
+            captureElement.Source = _mediaCapture;
+            //captureElement.Stretch = Stretch.UniformToFill;
+            await _mediaCapture.StartPreviewAsync();
+
+// ** Camera Worker
+//_sem.Release();
+//CameraWorker();
+//_timer.Start();
+
+// ** Camera Focus
+var focusControl = _mediaCapture.VideoDeviceController.FocusControl;
+            vlog("Support Focus: " + (focusControl.Supported? "Yes" : "No"));
+            if (focusControl.Supported)
+            {
+                //await mediaCapture.StartPreviewAsync();
+                await focusControl.UnlockAsync();
+
+focusControl.Configure(new FocusSettings
+                {
+                    Mode = FocusMode.Continuous,
+                    AutoFocusRange = AutoFocusRange.FullRange
+                });
+
+                /*
+                focusControl.Configure(new FocusSettings
+                {
+                    Mode = FocusMode.Auto
+                });
+                /
+            }
+        }
+
+
+ */

@@ -5,23 +5,56 @@
     xmlns:local="using:QR_Saga"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:UI="using:Microsoft.Advertising.WinRT.UI"
     mc:Ignorable="d">
 
-    <Grid>
+    <Grid Background="Black">
         <Grid.RowDefinitions>
             <RowDefinition/>
             <RowDefinition Height="Auto" MaxHeight="200"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <CaptureElement x:Name="captureElement" SizeChanged="captureElement_SizeChanged"  Stretch="UniformToFill" Grid.RowSpan="2"/>
+        <!--
+        ApplicationId="3f83fe91-d6be-434d-a0ae-7351c5a997f1"
+        AdUnitId="test"
         
-        <Image Canvas.ZIndex="5" Source="Assets/crosshairs-red2.png" HorizontalAlignment="Center" VerticalAlignment="Center" MaxHeight="100" MaxWidth="100" Grid.RowSpan="2" />
+        ApplicationId="9ac0927d-c89f-478e-913c-8a00e7c1270d"
+        AdUnitId="11678446"
+        
+        ApplicationId="07d6a00d-b5c6-4ab3-9974-8cea890bf1ba"
+        AdUnitId="11678447"
+        -->
+        <UI:AdControl 
+            ApplicationId="9ac0927d-c89f-478e-913c-8a00e7c1270d"
+            AdUnitId="11678446"
+            Width="320"
+            Height="50"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Canvas.ZIndex="6"/>
+
+        <CaptureElement 
+            x:Name="captureElement"
+            SizeChanged="captureElement_SizeChanged"
+            Stretch="UniformToFill"
+            Grid.RowSpan="2" 
+            Canvas.ZIndex="0"/>
+        
+        <Image 
+            Canvas.ZIndex="5" 
+            Source="Assets/crosshairs-red2.png"
+            HorizontalAlignment="Center" 
+            VerticalAlignment="Center"
+            MaxHeight="100"
+            MaxWidth="100" 
+            Grid.RowSpan="2"/>
 
         <ListView 
             x:Name="listLog" 
             RequestedTheme="Dark" 
-            Background="#7F000000">
+            Background="#7F000000"
+            Grid.Row="0">
             <x:String>Dev Item 1</x:String>
             <x:String>Dev Item 2</x:String>
             <x:String>Dev Item 3</x:String>
@@ -44,7 +77,12 @@
             <local:Scan Text="Dev Item 2"/>
         </ListView>
 
-        <CommandBar Name="commandBar" VerticalAlignment="Bottom" RequestedTheme="Dark" Grid.Row="2" IsSticky="True">
+        <CommandBar
+            Name="commandBar"
+            VerticalAlignment="Bottom" 
+            RequestedTheme="Dark" 
+            Grid.Row="2" 
+            IsSticky="True">
             <!-- Opening="CommandBar_Opening" -->
             <CommandBar.PrimaryCommands>
                 <AppBarToggleButton Name="toggleLog" Icon="Admin" Label="Log" Click="toggleLog_Click"/>

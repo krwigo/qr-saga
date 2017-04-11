@@ -11,7 +11,7 @@
     <Grid Background="Black">
         <Grid.RowDefinitions>
             <RowDefinition/>
-            <RowDefinition Height="Auto" MaxHeight="200"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -25,6 +25,7 @@
         ApplicationId="07d6a00d-b5c6-4ab3-9974-8cea890bf1ba"
         AdUnitId="11678447"
         -->
+        <!--
         <UI:AdControl 
             ApplicationId="9ac0927d-c89f-478e-913c-8a00e7c1270d"
             AdUnitId="11678446"
@@ -33,11 +34,11 @@
             HorizontalAlignment="Center"
             VerticalAlignment="Top"
             Canvas.ZIndex="6"/>
+        -->
 
         <CaptureElement 
             x:Name="captureElement"
             SizeChanged="captureElement_SizeChanged"
-            Stretch="UniformToFill"
             Grid.RowSpan="2" 
             Canvas.ZIndex="0"/>
         
@@ -58,6 +59,23 @@
             <x:String>Dev Item 1</x:String>
             <x:String>Dev Item 2</x:String>
             <x:String>Dev Item 3</x:String>
+            <x:String>Dev Item 4</x:String>
+            <x:String>Dev Item 5</x:String>
+            <x:String>Dev Item 6</x:String>
+            <x:String>Dev Item 7</x:String>
+            <x:String>Dev Item 8</x:String>
+            <x:String>Dev Item 9</x:String>
+            <x:String>Dev Item 10</x:String>
+            <x:String>Dev Item 11</x:String>
+            <x:String>Dev Item 12</x:String>
+            <x:String>Dev Item 13</x:String>
+            <x:String>Dev Item 14</x:String>
+            <x:String>Dev Item 15</x:String>
+            <x:String>Dev Item 16</x:String>
+            <x:String>Dev Item 17</x:String>
+            <x:String>Dev Item 18</x:String>
+            <x:String>Dev Item 19</x:String>
+            <x:String>Dev Item 20</x:String>
         </ListView>
 
         <ListView 
@@ -67,6 +85,7 @@
             ItemClick="listView1_ItemClick"
             IsItemClickEnabled="True" 
             SelectionMode="None"
+            MaxHeight="200"
             Grid.Row="1">
             <ListView.ItemTemplate>
                 <DataTemplate>
@@ -75,6 +94,13 @@
             </ListView.ItemTemplate>
             <local:Scan Text="Dev Item 1 This long text needs to wrap so blah blah blah blah blah 123 zerglings blah tomato and something else bike cow morty portal space"/>
             <local:Scan Text="Dev Item 2"/>
+            <local:Scan Text="Dev Item 3"/>
+            <local:Scan Text="Dev Item 4"/>
+            <local:Scan Text="Dev Item 5"/>
+            <local:Scan Text="Dev Item 6"/>
+            <local:Scan Text="Dev Item 7"/>
+            <local:Scan Text="Dev Item 8"/>
+            <local:Scan Text="Dev Item 9"/>
         </ListView>
 
         <CommandBar
@@ -88,7 +114,7 @@
                 <AppBarToggleButton Name="toggleLog" Icon="Admin" Label="Log" Click="toggleLog_Click"/>
                 <AppBarToggleButton Name="toggleResults" Icon="List" Label="Results" Click="toggleResults_Click" IsChecked="True"/>
                 <AppBarToggleButton Name="toggleHiRes" Icon="FontSize" Label="HiRes" Click="toggleHiRes_Click"/>
-                <AppBarToggleButton Name="toggleTorch" Icon="ShowResults" Label="Torch" Click="toggleTorch_Click"/>
+                <AppBarToggleButton Name="toggleTorch" Icon="Import"   Label="Torch" Click="toggleTorch_Click"/>
                 <AppBarToggleButton Name="toggleClipboard" Icon="Copy" Label="Clipboard" Click="toggleClipboard_Click"/>
                 <AppBarToggleButton Name="toggleBrowser" Icon="SetLockScreen" Label="Browser" Click="toggleBrowser_Click"/>
             </CommandBar.PrimaryCommands>

@@ -48,6 +48,7 @@ using Windows.Storage.FileProperties;
 using Windows.Devices.Sensors;
 using System.Text.RegularExpressions;
 using Windows.System.Profile;
+using Windows.System;
 
 // #pragma warning disable CS4014
 
@@ -325,8 +326,10 @@ namespace QR_Saga
             this.InitializeComponent();
             this.Loaded += MainPage_Loaded;
 
+            //2017.04.11 Rob: Should hide results [by default]
+
             setLog(false);
-            setResults(true);
+            setResults(false);
             listLog.Items.Clear();
             listResults.Items.Clear();
             toggleHiRes.Visibility = Visibility.Collapsed;
@@ -358,8 +361,57 @@ namespace QR_Saga
         private void MainPage_Loaded(object sender, RoutedEventArgs e)
         {
             jsonLoad();
+
+            //TestUser();
         }
-        
+
+        private async Task TestUser()
+        {
+            try {
+                /*
+                var users = await User.FindAllAsync(UserType.LocalUser);
+                vLog("Users[] " + users.Count());
+                var user = (string)await users.FirstOrDefault().GetPropertyAsync(KnownUserProperties.AccountName);
+                vLog("User " + user);
+                vLog("User0:" +users[0].NonRoamableId);
+                var domain = "";
+                var host = "";
+
+                if (string.IsNullOrEmpty(user)) {
+                    var domainWithUser = (string)await users.FirstOrDefault().GetPropertyAsync(KnownUserProperties.DomainName);
+                    domain = domainWithUser.Split('\\')[0];
+                    user = domainWithUser.Split('\\')[1];
+                    vLog("User1:" + user);
+                }
+                else {
+                    vLog("User2: NULL");
+                }
+                */
+
+                // https://docs.microsoft.com/en-us/uwp/api/windows.system.profile.knownretailinfoproperties
+                //e HardwareIdentification is pretty simple: You don't reference the required sources!
+                //You only see AnalyticsInfo and AnalyticsVersionInfo. Th
+
+                // http://stackoverflow.com/a/43295123
+                //var fileName = "user_id";
+                //var folder = ApplicationData.Current.RoamingFolder;
+                //var file = await folder.TryGetItemAsync(fileName);
+                //if (file == null) {
+                //    //if file does not exist we create a new guid
+                //    var storageFile = await folder.CreateFileAsync(fileName);
+                //    var newId = Guid.NewGuid().ToString();
+                //    await FileIO.WriteTextAsync(storageFile, newId);
+                //    return newId;
+                //} else {
+                //    //else we return the already exising guid
+                //    var storageFile = await folder.GetFileAsync(fileName);
+                //    return await FileIO.ReadTextAsync(storageFile);
+                //}
+            } catch (Exception ex) {
+                vEx("TestUser", ex);
+            }
+        }
+
         private async Task CameraStart()
         {
             try {
@@ -565,7 +617,7 @@ namespace QR_Saga
                     if (cameraTorch.PowerSupported) {
                         cameraTorch.PowerPercent = 100;
                     }
-                    cameraTorch.Enabled = false;
+                    cameraTorch.Enabled = toggleTorch.IsChecked ?? false;
                 }
             } catch (Exception ex) {
                 vEx("TorchControl", ex);
@@ -602,11 +654,13 @@ namespace QR_Saga
                         // Open
                         doClipboard(result.Text);
                         doBrowser(result.Text);
-                        await doUpload(result, currentFrame);
-                        await GetNameFromProductId(result.Text);
 
                         // Save
                         await jsonSave();
+
+                        // Extra
+                        await doUpload(result, currentFrame);
+                        await GetNameFromProductId(result.Text);
 
                         // Msgbox
                         await vMsgA("Scan Result:\n" + result.Text);

@@ -49,6 +49,8 @@ using Windows.Devices.Sensors;
 using System.Text.RegularExpressions;
 using Windows.System.Profile;
 using Windows.System;
+using Windows.UI.Notifications;
+using Windows.Data.Xml.Dom;
 
 // #pragma warning disable CS4014
 
@@ -92,18 +94,6 @@ namespace QR_Saga
             await msgbox.ShowAsync();
         }
 
-        private void setLog(bool value)
-        {
-            toggleLog.IsChecked = value;
-            listLog.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private void setResults(bool value)
-        {
-            toggleResults.IsChecked = value;
-            listResults.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
-        }
-
         private async Task jsonSave()
         {
             try {
@@ -135,9 +125,11 @@ namespace QR_Saga
         private void doClipboard(string text)
         {
             try {
-                DataPackage dataPackage = new DataPackage();
-                dataPackage.SetText(text);
-                Clipboard.SetContent(dataPackage);
+                if (toggleClipboard.IsOn) {
+                    DataPackage dataPackage = new DataPackage();
+                    dataPackage.SetText(text);
+                    Clipboard.SetContent(dataPackage);
+                }
             } catch {
             }
         }
@@ -145,7 +137,7 @@ namespace QR_Saga
         private void doBrowser(string url)
         {
             try {
-                if (toggleBrowser.IsChecked ?? false) {
+                if (toggleBrowser.IsOn) {
                     Windows.System.Launcher.LaunchUriAsync(new Uri(url));
                 }
             } catch {
@@ -178,6 +170,16 @@ namespace QR_Saga
                 await enc_encoder.FlushAsync();
                 var wbmBytes = new byte[enc_stream.Size];
                 await enc_stream.ReadAsync(wbmBytes.AsBuffer(), (uint)enc_stream.Size, Windows.Storage.Streams.InputStreamOptions.None);
+
+                try {
+                    // http://stackoverflow.com/a/381529
+                    using (Stream filestream = await ApplicationData.Current.LocalFolder.OpenStreamForWriteAsync("data.png", CreationCollisionOption.ReplaceExisting)) {
+                        filestream.Write(wbmBytes, 0, wbmBytes.Count());
+                    }
+                    doTileNotification();
+                } catch (Exception ex) {
+                    vEx("WriteAllBytes", ex);
+                }
 
                 // http://stackoverflow.com/a/33368251
                 MultipartFormDataContent form = new MultipartFormDataContent();
@@ -252,8 +254,48 @@ namespace QR_Saga
 {
     public sealed partial class MainPage : Page
     {
-        private async Task GetNameFromProductId(string productid)
+        //GetNameFromProductId("ms-windows-store://pdp/?PRODUCTID=9N3TZNP47FWG&SKUID=0012&CATALOGID=2&AUTH=MSA");
+        private async Task GetNameFromProductId(string result)
         {
+            return;
+
+            // ** Find Product ID
+            // ms-windows-store://pdp/?PRODUCTID=9N3TZNP47FWG&SKUID=0012&CATALOGID=2&AUTH=MSA
+
+            try {
+                Regex re_pid = new Regex("^ms-windows-store.*productid=([a-zA-Z0-9]+).*", RegexOptions.IgnoreCase | RegexOptions.Multiline);
+                foreach (Match m_pid in re_pid.Matches(result.ToLower())) {
+                    string pid = m_pid.Groups[1].Value;
+                    vLog("result.pid=" + pid);
+
+                    // ** Find Product Url
+                    MultipartFormDataContent form = new MultipartFormDataContent();
+                    form.Add(new StringContent(pid), "q");
+                    Uri uri = new Uri("http://apps.midtask.com/qr_saga/search/results.html");
+                    HttpClient client = new HttpClient();
+                    //HttpResponseMessage response = await client.PostAsync(uri, form);
+                    HttpResponseMessage response = await client.GetAsync(uri);
+                    string searchresults = await response.Content.ReadAsStringAsync();
+                    //vLog("results:" + searchresults);
+                    //doClipboard(searchresults);
+
+                    // href="https://www.microsoft.com/en-us/store/p/qr-saga/9nc19dp5w18w"
+                    //string sp = "href=['\"](http[^ '\"]+" + pid + "[^'\"]*)";
+                    string sp = ".*"+pid+".*";
+                    vLog("search.pattern:" + sp);
+                    Regex re_url = new Regex(sp, RegexOptions.IgnoreCase);
+                    vLog("ismatch:" + re_url.IsMatch(sp));
+                    foreach (Match m_url in re_url.Matches(searchresults)) {
+                        vLog("match");
+                        vMsgA(m_url.Groups[1].Value);
+                    }
+                    vLog("done");
+                }
+            } catch (Exception ex) {
+                vMsgA(ex.Message);
+            }
+
+
             /*
             // ms-windows-store://pdp/?PRODUCTID=9NC19DP5W18W&
             // ->
@@ -311,6 +353,10 @@ namespace QR_Saga
 
         string _rotation = "";
 
+        string _selecteddevice = "";
+
+        IPropertySet _localSettings = null;
+
         //private static readonly Guid RotationKey = new Guid("C380465D-2271-428C-9B83-ECEA3B4A85C1");
         //private readonly DisplayInformation _displayInformation = DisplayInformation.GetForCurrentView();
         //private readonly SimpleOrientationSensor _orientationSensor = SimpleOrientationSensor.GetDefault();
@@ -321,31 +367,110 @@ namespace QR_Saga
         //private InMemoryRandomAccessStream _stream = null;
         //private WriteableBitmap _writablebm = null;
 
+        void settingsLoad(bool reset=false)
+        {
+            vLog("settingsLoad: Reset " + reset.ToString());
+            if (reset) {
+                vLog("Resetting local settings");
+                _localSettings.Clear();
+            }
+
+            if (reset || !_localSettings.ContainsKey("toggleClipboadIsOn"))
+                _localSettings["toggleClipboadIsOn"] = true;
+            toggleClipboard.IsOn = (bool)_localSettings["toggleClipboadIsOn"];
+
+            if (reset || !_localSettings.ContainsKey("toggleBrowserIsOn"))
+                _localSettings["toggleBrowserIsOn"] = true;
+            toggleBrowser.IsOn = (bool)_localSettings["toggleBrowserIsOn"];
+
+            if (reset || !_localSettings.ContainsKey("toggleTorchIsOn"))
+                _localSettings["toggleTorchIsOn"] = false;
+            toggleTorch.IsOn = (bool)_localSettings["toggleTorchIsOn"];
+
+            if (reset || !_localSettings.ContainsKey("toggleLiveTileIsOn"))
+                _localSettings["toggleLiveTileIsOn"] = true;
+            toggleLiveTile.IsOn = (bool)_localSettings["toggleLiveTileIsOn"];
+
+            if (reset || !_localSettings.ContainsKey("toggleDevicesIsOn"))
+                _localSettings["toggleDevicesIsOn"] = false;
+            toggleDevices.IsOn = (bool)_localSettings["toggleDevicesIsOn"];
+
+            try {
+                if (reset)
+                    _localSettings["_selecteddevice"] = "";
+                _selecteddevice = (string)_localSettings["_selecteddevice"];
+            } catch(Exception ex) {
+                vEx("localSettings[selecteddevice]", ex);
+                _localSettings["_selecteddevice"] = _selecteddevice = "";
+            }
+        }
+
+        void doTileNotification()
+        {
+            try {
+                /*
+                https://docs.microsoft.com/en-us/uwp/schemas/tiles/tilesschema/schema-root
+                https://blogs.msdn.microsoft.com/tiles_and_toasts/2015/06/30/adaptive-tile-templates-schema-and-documentation/
+                https://docs.microsoft.com/en-us/uwp/api/Windows.Storage.ApplicationData#Windows_Storage_ApplicationData_LocalFolder
+                <img src="ms-appdata:///local/myFile.png" alt="" />
+                */
+
+                /*
+                string tiletext = "testest77888877";
+                <text>{tiletext}</text>
+                */
+
+                var updater = TileUpdateManager.CreateTileUpdaterForApplication();
+                updater.Clear();
+                if (!toggleLiveTile.IsOn)
+                    return;
+
+                string tileimg = "ms-appdata:///local/data.png";
+                string xmlstr = $@"
+                    <tile>
+                        <visual>
+                            <binding template='TileSmall'>
+                                <image src='{tileimg}'  placement='background'/>
+                            </binding>
+                            <binding template='TileMedium'>
+                                <image src='{tileimg}'  placement='background'/>
+                            </binding>
+                            <binding template='TileWide'>
+                                <image src='{tileimg}'  placement='background'/>
+                            </binding>
+                            <binding template='TileLarge'>
+                                <image src='{tileimg}'  placement='background'/>
+                            </binding>
+                        </visual>
+                    </tile>";
+
+                XmlDocument xmldoc = new XmlDocument();
+                xmldoc.LoadXml(xmlstr);
+
+                TileNotification tilenot = new TileNotification(xmldoc);
+
+                updater.Update(tilenot);
+            } catch(Exception ex) {
+                vEx("doTileNotification", ex);
+            }
+        }
+
         public MainPage()
         {
             this.InitializeComponent();
             this.Loaded += MainPage_Loaded;
 
-            //2017.04.11 Rob: Should hide results [by default]
-
-            setLog(false);
-            setResults(false);
             listLog.Items.Clear();
             listResults.Items.Clear();
-            toggleHiRes.Visibility = Visibility.Collapsed;
-            commandBar.ClosedDisplayMode = AppBarClosedDisplayMode.Minimal;
-#if DEBUG
-            setLog(true);
-#else
-#endif
-            toggleClipboard.IsChecked = true;
-            toggleBrowser.IsChecked = true;
 
-            vLog("mainPage()");
+            vLog("Page Init");
 
             Window.Current.VisibilityChanged += Current_VisibilityChanged;
             Window.Current.Activated += Current_Activated;
-            NavigationCacheMode = NavigationCacheMode.Required;
+            //NavigationCacheMode = NavigationCacheMode.Required;
+
+            _localSettings = ApplicationData.Current.LocalSettings.Values;
+            settingsLoad();
 
             _scans = new List<Scan>();
 
@@ -362,54 +487,8 @@ namespace QR_Saga
         {
             jsonLoad();
 
-            //TestUser();
-        }
-
-        private async Task TestUser()
-        {
-            try {
-                /*
-                var users = await User.FindAllAsync(UserType.LocalUser);
-                vLog("Users[] " + users.Count());
-                var user = (string)await users.FirstOrDefault().GetPropertyAsync(KnownUserProperties.AccountName);
-                vLog("User " + user);
-                vLog("User0:" +users[0].NonRoamableId);
-                var domain = "";
-                var host = "";
-
-                if (string.IsNullOrEmpty(user)) {
-                    var domainWithUser = (string)await users.FirstOrDefault().GetPropertyAsync(KnownUserProperties.DomainName);
-                    domain = domainWithUser.Split('\\')[0];
-                    user = domainWithUser.Split('\\')[1];
-                    vLog("User1:" + user);
-                }
-                else {
-                    vLog("User2: NULL");
-                }
-                */
-
-                // https://docs.microsoft.com/en-us/uwp/api/windows.system.profile.knownretailinfoproperties
-                //e HardwareIdentification is pretty simple: You don't reference the required sources!
-                //You only see AnalyticsInfo and AnalyticsVersionInfo. Th
-
-                // http://stackoverflow.com/a/43295123
-                //var fileName = "user_id";
-                //var folder = ApplicationData.Current.RoamingFolder;
-                //var file = await folder.TryGetItemAsync(fileName);
-                //if (file == null) {
-                //    //if file does not exist we create a new guid
-                //    var storageFile = await folder.CreateFileAsync(fileName);
-                //    var newId = Guid.NewGuid().ToString();
-                //    await FileIO.WriteTextAsync(storageFile, newId);
-                //    return newId;
-                //} else {
-                //    //else we return the already exising guid
-                //    var storageFile = await folder.GetFileAsync(fileName);
-                //    return await FileIO.ReadTextAsync(storageFile);
-                //}
-            } catch (Exception ex) {
-                vEx("TestUser", ex);
-            }
+            //Testing
+            doTileNotification();
         }
 
         private async Task CameraStart()
@@ -418,8 +497,26 @@ namespace QR_Saga
                 if (_mediaCapture == null) {
                     vLog("CameraStart()");
 
-                    DeviceInformationCollection deviceList = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
-                    DeviceInformation cameraDevice = (from webcam in deviceList where webcam.IsEnabled select webcam).FirstOrDefault();
+                    if (!toggleDevices.IsOn)
+                        _selecteddevice = "";
+
+                    DeviceInformation cameraDevice = null;
+                    DeviceInformationCollection devices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+                    listDevices.Items.Clear();
+                    foreach (DeviceInformation device in devices) {
+                        if (!device.IsEnabled)
+                            continue;
+
+                        var item = new ListViewItem();
+                        item.Content = device.Name;
+                        item.Tag = device.Id;
+                        item.IsSelected = device.Id == _selecteddevice;
+
+                        if (cameraDevice == null || device.Id == _selecteddevice)
+                            cameraDevice = device;
+
+                        listDevices.Items.Add(item);
+                    }
 
                     if (cameraDevice == null) {
                         vLog("No camera device.");
@@ -431,8 +528,6 @@ namespace QR_Saga
                     vLog("Dev ID: " + cameraDevice.Id);
 
                     _mediaCapture = new MediaCapture();
-                    //_mediaCapture.Failed += MediaCapture_Failed;
-
                     try {
                         await _mediaCapture.InitializeAsync(new MediaCaptureInitializationSettings {
                             VideoDeviceId = cameraDevice.Id,
@@ -454,9 +549,6 @@ namespace QR_Saga
                     }
                     vLog("IsExternal: " + (_isExternal ? "Yes" : "No"));
                     vLog("isMirroring: " + (_isMirroring ? "Yes" : "No"));
-
-                    //_displayRequest.RequestActive();
-                    //_systemMediaControls.PropertyChanged += SystemMediaControls_PropertyChanged;
 
                     captureElement.Source = _mediaCapture;
                     captureElement.Stretch = Stretch.UniformToFill;
@@ -492,7 +584,7 @@ namespace QR_Saga
                 */
             } catch (Exception ex) {
                 vEx("CameraStart", ex);
-                setLog(true);
+                pivotRoot.SelectedIndex = 0;
             }
         }
 
@@ -543,6 +635,10 @@ namespace QR_Saga
 
         private async Task CameraRotate()
         {
+            try {
+                captureElement.Stretch = Stretch.UniformToFill;
+            } catch { }
+            
             if (!_isInitialized || !_isPreviewing || _isExternal)
                 return;
 
@@ -617,7 +713,7 @@ namespace QR_Saga
                     if (cameraTorch.PowerSupported) {
                         cameraTorch.PowerPercent = 100;
                     }
-                    cameraTorch.Enabled = toggleTorch.IsChecked ?? false;
+                    cameraTorch.Enabled = toggleTorch.IsOn;
                 }
             } catch (Exception ex) {
                 vEx("TorchControl", ex);
@@ -654,6 +750,7 @@ namespace QR_Saga
                         // Open
                         doClipboard(result.Text);
                         doBrowser(result.Text);
+                        doTileNotification();
 
                         // Save
                         await jsonSave();
@@ -675,11 +772,6 @@ namespace QR_Saga
             }
         }
         
-        private void OnTimer(object state)
-        {
-            throw new NotImplementedException();
-        }
-
         private void Current_VisibilityChanged(object sender, Windows.UI.Core.VisibilityChangedEventArgs e)
         {
             vLog("VisibilityChanged: " + (e.Visible ? "Visible" : "Collapsed"));
@@ -688,6 +780,8 @@ namespace QR_Saga
 
         private void Current_Activated(object sender, WindowActivatedEventArgs e)
         {
+            //pivotRoot.SelectedIndex = 0;
+
             CameraStart();
 
             try {
@@ -726,51 +820,6 @@ namespace QR_Saga
             doBrowser(item.Text);
         }
 
-        private void captureElement_SizeChanged(object sender, SizeChangedEventArgs e)
-        {
-            CameraRotate();
-        }
-
-        private void toggleClipboard_Click(object sender, RoutedEventArgs e)
-        {
-            AppBarToggleButton b = (AppBarToggleButton)sender;
-            vLog("toggleClipboard: " + b.IsChecked);
-            //_localSettings["toggleClipboard"] = b.IsChecked;
-        }
-
-        private void toggleTorch_Click(object sender, RoutedEventArgs e)
-        {
-            AppBarToggleButton b = (AppBarToggleButton)sender;
-            vLog("toggleTorch: " + b.IsChecked);
-            CameraTorch();
-        }
-
-        private void toggleHiRes_Click(object sender, RoutedEventArgs e)
-        {
-            AppBarToggleButton b = (AppBarToggleButton)sender;
-            vLog("toggleHiRes: " + b.IsChecked);
-        }
-
-        private void toggleBrowser_Click(object sender, RoutedEventArgs e)
-        {
-            AppBarToggleButton b = (AppBarToggleButton)sender;
-            vLog("toggleBrowser: " + b.IsChecked);
-        }
-
-        private void toggleLog_Click(object sender, RoutedEventArgs e)
-        {
-            AppBarToggleButton b = (AppBarToggleButton)sender;
-            vLog("toggleLog: " + b.IsChecked);
-            setLog(b.IsChecked ?? false);
-        }
-
-        private void toggleResults_Click(object sender, RoutedEventArgs e)
-        {
-            AppBarToggleButton b = (AppBarToggleButton)sender;
-            vLog("toggleResults: " + b.IsChecked);
-            setResults(b.IsChecked ?? false);
-        }
-
         private static int ConvertDisplayOrientationToDegrees(DisplayOrientations orientation)
         {
             switch (orientation) {
@@ -786,21 +835,88 @@ namespace QR_Saga
             }
         }
 
-        /*
-        private static PhotoOrientation ConvertOrientationToPhotoOrientation(SimpleOrientation orientation)
+        private void captureElement_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            switch (orientation) {
-                case SimpleOrientation.Rotated90DegreesCounterclockwise:
-                    return PhotoOrientation.Rotate90;
-                case SimpleOrientation.Rotated180DegreesCounterclockwise:
-                    return PhotoOrientation.Rotate180;
-                case SimpleOrientation.Rotated270DegreesCounterclockwise:
-                    return PhotoOrientation.Rotate270;
-                case SimpleOrientation.NotRotated:
-                default:
-                    return PhotoOrientation.Normal;
-            }
+            CameraRotate();
         }
-        */
+
+        private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            CameraRotate();
+        }
+
+        private void PivotItem_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            CameraRotate();
+        }
+
+        private void Grid_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            CameraRotate();
+        }
+
+        private void toggleClipboard_Toggled(object sender, RoutedEventArgs e)
+        {
+            _localSettings["toggleClipboardIsOn"] = toggleClipboard.IsOn;
+        }
+
+        private void toggleBrowser_Toggled(object sender, RoutedEventArgs e)
+        {
+            _localSettings["toggleBrowserIsOn"] = toggleBrowser.IsOn;
+        }
+
+        private void toggleLiveTile_Toggled(object sender, RoutedEventArgs e)
+        {
+            _localSettings["toggleLiveTileIsOn"] = toggleLiveTile.IsOn;
+
+            doTileNotification();
+        }
+
+        private void toggleTorch_Toggled(object sender, RoutedEventArgs e)
+        {
+            _localSettings["toggleTorchIsOn"] = toggleTorch.IsOn;
+
+            CameraTorch();
+        }
+
+        private void toggleDevices_Toggled(object sender, RoutedEventArgs e)
+        {
+            _localSettings["toggleDevicesIsOn"] = toggleDevices.IsOn;
+            _localSettings["selecteddevice"] = _selecteddevice;
+
+            if (!toggleDevices.IsOn)
+                CameraRestart();
+        }
+
+        private void listDevices_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            vLog("listDevices_SelectionChanged");
+
+            try {
+                ListViewItem item = (ListViewItem)listDevices.SelectedItem;
+                _selecteddevice = (string)item.Tag;
+                toggleDevices.IsOn = true;
+                CameraRestart();
+            }
+            catch(Exception ex) {
+                vEx("listDevices_SelectionChanged", ex);
+            }
+
+            _localSettings["toggleDevicesIsOn"] = toggleDevices.IsOn;
+            _localSettings["selecteddevice"] = _selecteddevice;
+        }
+
+        private void buttonResetSettings_Click(object sender, RoutedEventArgs e)
+        {
+            settingsLoad(true);
+            CameraRestart();
+        }
+
+        private void buttonResetResults_Click(object sender, RoutedEventArgs e)
+        {
+            _scans.Clear();
+            jsonSave();
+            jsonLoad();
+        }
     }
 }

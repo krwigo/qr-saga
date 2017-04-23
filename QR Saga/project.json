@@ -2,6 +2,7 @@
   "dependencies": {
     "Microsoft.NETCore.UniversalWindowsPlatform": "5.2.2",
     "Microsoft.Services.Store.SDK": "10.1703.19001",
+    "XamlAnimatedGif": "1.1.8",
     "ZXing.Net.Mobile": "2.1.47"
   },
   "frameworks": {

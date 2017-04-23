@@ -9,6 +9,7 @@ using Windows.ApplicationModel.Activation;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.Foundation.Metadata;
+using Windows.Graphics.Display;
 using Windows.UI;
 using Windows.UI.Popups;
 using Windows.UI.ViewManagement;
@@ -32,45 +33,36 @@ namespace QR_Saga
         protected override void OnLaunched(LaunchActivatedEventArgs e)
         {
             Frame rootFrame = Window.Current.Content as Frame;
-            if (rootFrame == null)
-            {
+            if (rootFrame == null) {
                 rootFrame = new Frame();
 
-                try
-                {
-                    if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.ApplicationView"))
-                    {
+                try {
+                    if (ApiInformation.IsTypePresent("Windows.UI.ViewManagement.ApplicationView")) {
                         var titleBar = ApplicationView.GetForCurrentView().TitleBar;
-                        if (titleBar != null)
-                        {
+                        if (titleBar != null) {
                             titleBar.ButtonBackgroundColor = Colors.Black;
                             titleBar.ButtonForegroundColor = Colors.White;
                             titleBar.BackgroundColor = Colors.Black;
                             titleBar.ForegroundColor = Colors.White;
                         }
                     }
-                }
-                catch
-                {
-                }
+                } catch { }
 
-                try
-                {
+                try {
                     ApplicationView.PreferredLaunchViewSize = new Size(420, 600);
                     ApplicationView.PreferredLaunchWindowingMode = ApplicationViewWindowingMode.PreferredLaunchViewSize;
                     ApplicationView.GetForCurrentView().SetPreferredMinSize(new Size(420, 600));
-                }
-                catch
-                {
-                }
+                } catch { }
+
+                try {
+                    DisplayInformation.AutoRotationPreferences = DisplayOrientations.Portrait;
+                } catch { }
 
                 Window.Current.Content = rootFrame;
             }
 
-            if (e.PrelaunchActivated == false)
-            {
-                if (rootFrame.Content == null)
-                {
+            if (e.PrelaunchActivated == false) {
+                if (rootFrame.Content == null) {
                     rootFrame.Navigate(typeof(MainPage), e.Arguments);
                 }
                 Window.Current.Activate();

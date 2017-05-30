@@ -526,7 +526,7 @@ namespace QR_Saga
 
                     vLog("Device: " + cameraDevice.Name);
                     vLog("Dev ID: " + cameraDevice.Id);
-
+                    
                     _mediaCapture = new MediaCapture();
                     try {
                         await _mediaCapture.InitializeAsync(new MediaCaptureInitializationSettings {
@@ -554,9 +554,15 @@ namespace QR_Saga
                     captureElement.Stretch = Stretch.UniformToFill;
                     captureElement.FlowDirection = _isMirroring ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
 
-                    double _width = 640;
-                    double _height = 480;
-                    _videoframe = new VideoFrame(BitmapPixelFormat.Bgra8, (int)_width, (int)_height);
+                    // 2017/05/29 18:23:16
+                    var previewProperties = _mediaCapture.VideoDeviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
+                    _videoframe = new VideoFrame(BitmapPixelFormat.Bgra8, (int)previewProperties.Width, (int)previewProperties.Height);
+                    vLog("Videoframe; Width:" + previewProperties.Width.ToString() + " Height:" + previewProperties.Height.ToString());
+                    //
+
+                    // double _width = 640;
+                    // double _height = 480;
+                    // _videoframe = new VideoFrame(BitmapPixelFormat.Bgra8, (int)_width, (int)_height);
                     //_imgprop = new ImageEncodingProperties() { Subtype = "BMP" };
                     //_stream = new InMemoryRandomAccessStream();
                     //_writablebm = new WriteableBitmap((int)_width, (int)_height);
@@ -695,7 +701,8 @@ namespace QR_Saga
                 if (focusControl.Supported) {
                     focusControl.Configure(new FocusSettings {
                         Mode = FocusMode.Continuous,
-                        AutoFocusRange = AutoFocusRange.FullRange
+                        AutoFocusRange = AutoFocusRange.Normal,
+                        Distance = ManualFocusDistance.Nearest 
                     });
                     await focusControl.FocusAsync();
                 }
@@ -757,10 +764,12 @@ namespace QR_Saga
 
                         // Extra
                         await doUpload(result, currentFrame);
-                        await GetNameFromProductId(result.Text);
+                        //await GetNameFromProductId(result.Text);
 
                         // Msgbox
-                        await vMsgA("Scan Result:\n" + result.Text);
+                        if (!toggleBrowser.IsOn) {
+                            await vMsgA("Scan Result:\n" + result.Text);
+                        }
                     }
                 } catch (System.Runtime.InteropServices.COMException) {
                 } catch (Exception ex) {
